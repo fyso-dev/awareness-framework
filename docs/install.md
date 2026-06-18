@@ -7,8 +7,8 @@ The framework can still be used manually from templates. The CLI is recommended 
 ## Requirements
 
 - Node.js 20 or newer
-- Git access to `github.com/fyso-dev/awareness-framework`
 - A shell where global npm binaries are on `PATH`
+- npm registry access to `@fyso/awareness-framework`
 
 Check Node:
 
@@ -18,10 +18,10 @@ node --version
 
 ## Install The CLI
 
-Install from GitHub:
+Install from npm:
 
 ```bash
-npm install -g git+https://github.com/fyso-dev/awareness-framework.git
+npm install -g @fyso/awareness-framework
 ```
 
 Verify:
@@ -33,7 +33,7 @@ awareness help
 If global npm cache permissions are broken on the machine, use a temporary cache:
 
 ```bash
-npm_config_cache=/tmp/npm-cache-awareness npm install -g git+https://github.com/fyso-dev/awareness-framework.git
+npm_config_cache=/tmp/npm-cache-awareness npm install -g @fyso/awareness-framework
 ```
 
 ## Initialize Private State
@@ -205,10 +205,10 @@ XDG_CONFIG_HOME=/path/to/config-home awareness init --wrappers
 
 ## Update
 
-Reinstall from GitHub:
+Reinstall from npm:
 
 ```bash
-npm install -g git+https://github.com/fyso-dev/awareness-framework.git
+npm install -g @fyso/awareness-framework
 ```
 
 Then refresh local private files and wrappers:

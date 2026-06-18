@@ -99,7 +99,7 @@ Personality is treated as a private operating profile: continuity, voice, contex
 ## CLI Quick Start
 
 ```bash
-npm install -g git+https://github.com/fyso-dev/awareness-framework.git
+npm install -g @fyso/awareness-framework
 awareness init
 awareness init --wrappers
 awareness status

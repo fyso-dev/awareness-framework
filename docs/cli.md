@@ -4,10 +4,10 @@ The Awareness Framework CLI is an optional helper. The framework does not requir
 
 Instead of asking every agent to remember the full protocol, use commands that check and maintain private files.
 
-## Install From The Repository
+## Install
 
 ```bash
-npm install -g git+https://github.com/fyso-dev/awareness-framework.git
+npm install -g @fyso/awareness-framework
 ```
 
 See [Install](install.md) for first-run setup, wrapper initialization, updates, and custom paths.
