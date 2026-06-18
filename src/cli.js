@@ -48,6 +48,8 @@ export function runCli(argv, options = {}) {
         return scheduleCommand(ctx, subcommand, parsed.opts);
       case 'personality':
         return personalityCommand(ctx, subcommand, parsed.opts);
+      case 'user':
+        return userCommand(ctx, subcommand, parsed.opts);
       default:
         err(ctx, `Unknown command: ${command}`);
         err(ctx, 'Run `awareness help` for usage.');
@@ -113,6 +115,14 @@ Usage:
   awareness personality show [--home PATH]
   awareness personality note --text TEXT [--evidence TEXT] [--home PATH]
   awareness personality adopt --text TEXT [--evidence TEXT] [--home PATH]
+  awareness user show --user ID [--channel NAME] [--home PATH]
+  awareness user note --user ID --kind nickname|question|topic|preference|fact|note --text TEXT [--evidence TEXT] [--channel NAME] [--home PATH]
+
+Scope options:
+  --home PATH                 Exact/base private state folder. Default: ~/.agents
+  --agent-folder PATH         Alias for the base private state folder.
+  --channel NAME              Store state under <folder>/channels/<safe-name>.
+  --user ID                   Select a user memory file for user commands.
 
 The CLI maintains private files under ~/.agents by default. It does not post to Jira, GitHub, or any external system.`);
 }
@@ -126,7 +136,7 @@ function initCommand(ctx, opts) {
   const existing = [];
   const overwritten = [];
 
-  for (const dir of ['awareness', 'worklog', 'memory', 'evaluations', 'runtime']) {
+  for (const dir of ['awareness', 'worklog', 'memory', 'memory/users', 'evaluations', 'runtime']) {
     ensureDir(path.join(home, dir));
   }
 
@@ -350,6 +360,67 @@ function personalityCommand(ctx, subcommand, opts) {
   }
 }
 
+function userCommand(ctx, subcommand, opts) {
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const user = selectedUser(ctx, opts);
+  const userSlug = safeScopeSlug(user, 'user');
+  const file = userMemoryPath(home, userSlug);
+
+  switch (subcommand) {
+    case 'show':
+    case undefined:
+      if (!fs.existsSync(file)) {
+        err(ctx, `Missing user memory: ${file}`);
+        return 1;
+      }
+      out(ctx, fs.readFileSync(file, 'utf8').trimEnd());
+      return 0;
+    case 'note':
+      return userMemoryAppend(ctx, file, user, opts);
+    default:
+      err(ctx, `Unknown user command: ${subcommand}`);
+      err(ctx, 'Use: show or note.');
+      return 1;
+  }
+}
+
+function userMemoryAppend(ctx, file, user, opts) {
+  const text = required(opts, 'text');
+  const kind = opts.kind || 'note';
+  const evidence = opts.evidence || 'Not specified';
+  const section = userMemorySection(kind);
+  const today = todayParts(ctx);
+  const timestamp = formatTimestamp(today);
+
+  ensureDir(path.dirname(file));
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, initialUserMemory(user, timestamp));
+  }
+
+  let content = fs.readFileSync(file, 'utf8');
+  content = replaceMetadata(content, 'Updated', timestamp);
+  content = appendToSection(content, section, `- ${today.date} ${today.time}: ${text} (evidence: ${evidence})\n`);
+  fs.writeFileSync(file, content);
+  out(ctx, `User memory updated: ${file}`);
+  return 0;
+}
+
+function userMemorySection(kind) {
+  const sections = {
+    nickname: 'Nicknames',
+    question: 'Questions',
+    topic: 'Topics',
+    preference: 'Preferences',
+    fact: 'Facts',
+    note: 'Notes',
+  };
+  if (!sections[kind]) {
+    throw new Error(`Invalid user memory kind: ${kind}. Valid kinds: ${Object.keys(sections).join(', ')}`);
+  }
+  return sections[kind];
+}
+
 function hookCommand(ctx, subcommand, opts) {
   switch (subcommand) {
     case 'run':
@@ -392,7 +463,7 @@ function hookInstallCommand(ctx, opts) {
   const userHome = userHomePath(ctx, opts);
   const configHome = configHomePath(ctx, opts, userHome);
   const command = opts.command || ctx.env.AWARENESS_COMMAND || 'awareness';
-  const home = opts.home || ctx.env.AGENTS_HOME ? agentsHome(ctx, opts) : null;
+  const home = shouldPinAwarenessHome(ctx, opts) ? agentsHome(ctx, opts) : null;
   const installed = [];
   const existing = [];
 
@@ -459,7 +530,8 @@ function scheduleInstallCommand(ctx, opts) {
   const cadences = expandTargets(cadence, ['hourly', 'daily']);
   const userHome = userHomePath(ctx, opts);
   const command = opts.command || ctx.env.AWARENESS_COMMAND || 'awareness';
-  const home = opts.home || ctx.env.AGENTS_HOME ? agentsHome(ctx, opts) : path.join(userHome, '.agents');
+  const home = shouldPinAwarenessHome(ctx, opts) ? agentsHome(ctx, opts) : path.join(userHome, '.agents');
+  const labelScope = scopeLabel(ctx, opts);
   const launchAgentDir = path.join(userHome, 'Library', 'LaunchAgents');
   const launchdLogDir = path.join(home, 'runtime', 'launchd');
   const written = [];
@@ -469,12 +541,13 @@ function scheduleInstallCommand(ctx, opts) {
   ensureDir(launchdLogDir);
 
   for (const target of cadences) {
-    const file = path.join(launchAgentDir, `dev.fyso.awareness.${target}.plist`);
+    const label = labelScope ? `dev.fyso.awareness.${labelScope}.${target}` : `dev.fyso.awareness.${target}`;
+    const file = path.join(launchAgentDir, `${label}.plist`);
     const args = [command, 'schedule', 'run', '--cadence', target];
     if (home) args.push('--home', home);
     const interval = target === 'hourly' ? 3600 : 86400;
     fs.writeFileSync(file, launchAgentPlist({
-      label: `dev.fyso.awareness.${target}`,
+      label,
       args,
       interval,
       stdoutPath: path.join(launchdLogDir, `${target}.out.log`),
@@ -483,7 +556,7 @@ function scheduleInstallCommand(ctx, opts) {
     written.push(file);
 
     if (opts.load) {
-      const result = loadLaunchAgent(file, `dev.fyso.awareness.${target}`);
+      const result = loadLaunchAgent(file, label);
       if (result.status !== 0) {
         throw new Error(`launchctl failed for ${file}: ${result.stderr || result.stdout || `exit ${result.status}`}`);
       }
@@ -852,7 +925,9 @@ function ensurePrivateState(home, ctx) {
   ensureDir(path.join(home, 'awareness'));
   ensureDir(path.join(home, 'worklog'));
   ensureDir(path.join(home, 'memory'));
+  ensureDir(path.join(home, 'memory', 'users'));
   ensureDir(path.join(home, 'evaluations'));
+  ensureDir(path.join(home, 'runtime'));
   if (!fs.existsSync(path.join(home, 'AGENTS.md'))) fs.writeFileSync(path.join(home, 'AGENTS.md'), readTemplate('agent-instructions.md'));
   if (!fs.existsSync(awarenessPath(home))) fs.writeFileSync(awarenessPath(home), initialAwareness(today));
   if (!fs.existsSync(path.join(home, 'worklog', `${today.date}.md`))) fs.writeFileSync(path.join(home, 'worklog', `${today.date}.md`), dailyWorklog(today.date));
@@ -1039,6 +1114,39 @@ function privateMemorySeed(title) {
 `;
 }
 
+function initialUserMemory(user, timestamp) {
+  return `# User Memory - ${user}
+
+- Updated: ${timestamp}
+- Scope: Local private user memory; do not commit
+- User: ${user}
+
+## Nicknames
+
+- None yet.
+
+## Questions
+
+- None yet.
+
+## Topics
+
+- None yet.
+
+## Preferences
+
+- None yet.
+
+## Facts
+
+- None yet.
+
+## Notes
+
+- None yet.
+`;
+}
+
 function normalizeState(state) {
   if (!VALID_STATES.has(state)) {
     throw new Error(`Invalid state: ${state}. Valid states: ${[...VALID_STATES].join(', ')}`);
@@ -1066,8 +1174,12 @@ function required(opts, key) {
 }
 
 function agentsHome(ctx, opts) {
-  const raw = opts.home || ctx.env.AGENTS_HOME || path.join(os.homedir(), '.agents');
-  return path.resolve(expandHome(raw));
+  const raw = opts.home
+    || opts.agentFolder
+    || ctx.env.AGENTS_HOME
+    || ctx.env.AWARENESS_AGENT_FOLDER
+    || path.join(os.homedir(), '.agents');
+  return scopedHome(path.resolve(expandHome(raw)), awarenessScope(ctx, opts));
 }
 
 function userHomePath(ctx, opts) {
@@ -1078,6 +1190,54 @@ function userHomePath(ctx, opts) {
 function configHomePath(ctx, opts, userHome) {
   const raw = opts.configHome || ctx.env.XDG_CONFIG_HOME || path.join(userHome, '.config');
   return path.resolve(expandHome(raw));
+}
+
+function shouldPinAwarenessHome(ctx, opts) {
+  return Boolean(
+    opts.home
+    || opts.agentFolder
+    || ctx.env.AGENTS_HOME
+    || ctx.env.AWARENESS_AGENT_FOLDER
+    || awarenessScope(ctx, opts).channel,
+  );
+}
+
+function awarenessScope(ctx, opts) {
+  const channel = opts.channel || ctx.env.AWARENESS_CHANNEL || '';
+  return {
+    channel: channel ? safeScopeSlug(channel, 'channel') : '',
+  };
+}
+
+function selectedUser(ctx, opts) {
+  const user = opts.user || ctx.env.AWARENESS_USER || '';
+  if (!user || user === true) {
+    throw new Error('Missing required option: --user');
+  }
+  return user;
+}
+
+function scopedHome(base, scope) {
+  let home = base;
+  if (scope.channel) home = path.join(home, 'channels', scope.channel);
+  return home;
+}
+
+function scopeLabel(ctx, opts) {
+  const scope = awarenessScope(ctx, opts);
+  return scope.channel;
+}
+
+function safeScopeSlug(value, kind) {
+  const slug = String(value)
+    .trim()
+    .replace(/^#|^@/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96);
+  if (!slug) throw new Error(`Invalid ${kind} scope: ${value}`);
+  return slug;
 }
 
 function expandHome(value) {
@@ -1092,6 +1252,10 @@ function awarenessPath(home) {
 
 function personalityPath(home) {
   return path.join(home, 'memory', 'personality.md');
+}
+
+function userMemoryPath(home, userSlug) {
+  return path.join(home, 'memory', 'users', `${userSlug}.md`);
 }
 
 function ensureDir(dir) {

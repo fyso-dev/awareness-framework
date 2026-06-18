@@ -102,6 +102,19 @@ Generated files:
 
 Use an absolute command path for LaunchAgents. `launchd` does not run through an interactive shell and may not have the same `PATH`.
 
+Install a channel-scoped schedule when a multi-channel integration needs independent maintenance:
+
+```bash
+awareness schedule install --cadence all --channel support --command "$(command -v awareness)"
+```
+
+This writes labels such as:
+
+```text
+dev.fyso.awareness.support.hourly
+dev.fyso.awareness.support.daily
+```
+
 ## Tool Notes
 
 ### Codex

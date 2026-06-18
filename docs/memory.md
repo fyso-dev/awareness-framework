@@ -9,6 +9,7 @@ Awareness Framework separates memory by time horizon and trust level. The goal i
 | Working memory | `awareness/current.md` | Current session or active day | Current focus, active tasks, blockers, next actions |
 | Episodic memory | `worklog/YYYY-MM-DD.md`, `evaluations/YYYY-MM-DD.md` | Daily history | Chronological evidence, decisions, handoff context, end-of-day reporting |
 | Long-term memory | `memory/personality.md`, `memory/preferences.md`, `memory/patterns.md`, `memory/long-term.md` | Durable but curated | Stable preferences, recurring patterns, durable collaboration rules |
+| User memory | `memory/users/<user>.md` | Durable but narrow | Nicknames, repeated questions, topics, explicit preferences for a participant |
 | Framework memory | Versioned docs and templates | Reviewed history | Reusable methodology that applies beyond one operator or day |
 
 Do not load every layer into every prompt. Load the smallest layer that answers the current need.
@@ -77,7 +78,11 @@ Recommended long-term files:
 ~/.agents/memory/preferences.md
 ~/.agents/memory/patterns.md
 ~/.agents/memory/long-term.md
+~/.agents/memory/users/<user>.md
+~/.agents/channels/<channel>/memory/users/<user>.md
 ```
+
+User memory is not a full personal profile. It is a narrow interaction aid. Use it for nicknames, repeated questions, recent topics, and explicit preferences. Do not use it for raw transcripts, sensitive personal details, inferred traits, or private information that was not intentionally shared.
 
 ## Promotion Pipeline
 
@@ -112,6 +117,7 @@ During work:
 - Use the worklog for chronological evidence.
 - Use awareness for current state.
 - Use long-term memory for stable style and decision guidance.
+- Use `memory/users/<user>.md` only for narrow participant-specific facts that help the current interaction.
 
 Before handoff:
 
