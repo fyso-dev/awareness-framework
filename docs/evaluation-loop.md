@@ -21,13 +21,17 @@ This loop evaluates both execution quality and memory quality. A good evaluation
 | Suggest a better template | Merge methodology changes |
 | Flag noisy or missing fields | Store new durable personal memory |
 | Prepare an improvement proposal | Apply organization-wide rules |
+| Record hook and scheduler runtime events | Treat runtime events as work evidence |
 
 ## Cadence
 
 | Cadence | Question |
 |---------|----------|
+| Session hook | Did the agent reach a lifecycle boundary that should be recorded? |
+| Hourly schedule | Is private state healthy enough for parallel work to continue? |
 | Task switch | Was the previous task left with a clear state and next action? |
 | Handoff | Can another agent continue from private files alone? |
+| Daily schedule | Should a private evaluation note be created for review? |
 | End of day | Can the day be summarized by task ID with evidence? |
 | Weekly | Did recurring failures justify a framework change? |
 
@@ -96,6 +100,7 @@ Scores are diagnostic. A low score should produce a targeted improvement proposa
 | Repeated workflow friction | Propose a template or docs PR |
 | Sensitive or stale memory | Prune private memory |
 | Tool command confusion | Improve CLI docs or command behavior |
+| Repeated scheduler warning | Improve local habits, templates, or CLI checks |
 
 ## Evaluation Output
 

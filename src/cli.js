@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const VALID_STATES = new Set(['started', 'in-progress', 'paused', 'blocked', 'waiting', 'done', 'in-review', 'ready']);
@@ -41,6 +42,10 @@ export function runCli(argv, options = {}) {
         return handoffCommand(ctx, parsed.opts);
       case 'evaluate':
         return evaluateCommand(ctx, parsed.opts);
+      case 'hook':
+        return hookCommand(ctx, subcommand, parsed.opts);
+      case 'schedule':
+        return scheduleCommand(ctx, subcommand, parsed.opts);
       case 'personality':
         return personalityCommand(ctx, subcommand, parsed.opts);
       default:
@@ -101,6 +106,10 @@ Usage:
   awareness log --task ID --summary TEXT --changes TEXT [--context TEXT] [--state STATE] [--evidence TEXT] [--next TEXT] [--home PATH]
   awareness handoff [--home PATH]
   awareness evaluate [--home PATH] [--force] [--print]
+  awareness hook run --event EVENT [--tool TOOL] [--quiet] [--home PATH]
+  awareness hook install --tool codex|claude|opencode|all [--command CMD] [--home PATH] [--user-home PATH] [--config-home PATH] [--overwrite]
+  awareness schedule run --cadence hourly|daily [--home PATH]
+  awareness schedule install --cadence hourly|daily|all [--command CMD] [--load] [--home PATH] [--user-home PATH]
   awareness personality show [--home PATH]
   awareness personality note --text TEXT [--evidence TEXT] [--home PATH]
   awareness personality adopt --text TEXT [--evidence TEXT] [--home PATH]
@@ -117,7 +126,7 @@ function initCommand(ctx, opts) {
   const existing = [];
   const overwritten = [];
 
-  for (const dir of ['awareness', 'worklog', 'memory', 'evaluations']) {
+  for (const dir of ['awareness', 'worklog', 'memory', 'evaluations', 'runtime']) {
     ensureDir(path.join(home, dir));
   }
 
@@ -339,6 +348,327 @@ function personalityCommand(ctx, subcommand, opts) {
       err(ctx, 'Use: show, note, or adopt.');
       return 1;
   }
+}
+
+function hookCommand(ctx, subcommand, opts) {
+  switch (subcommand) {
+    case 'run':
+      return hookRunCommand(ctx, opts);
+    case 'install':
+      return hookInstallCommand(ctx, opts);
+    default:
+      err(ctx, `Unknown hook command: ${subcommand || '(missing)'}`);
+      err(ctx, 'Use: awareness hook run or awareness hook install.');
+      return 1;
+  }
+}
+
+function hookRunCommand(ctx, opts) {
+  const home = agentsHome(ctx, opts);
+  const today = todayParts(ctx);
+  const event = required(opts, 'event');
+  const tool = opts.tool || 'unknown';
+
+  ensurePrivateState(home, ctx);
+  const warnings = collectWarnings(home, today);
+  const file = appendRuntimeEvent(home, today, 'hooks', {
+    source: 'hook',
+    tool,
+    event,
+    warnings: warnings.length,
+  });
+
+  if (!opts.quiet) {
+    out(ctx, `Hook recorded: ${tool} ${event}`);
+    out(ctx, `Runtime log: ${file}`);
+    out(ctx, warnings.length ? `Warnings: ${warnings.length}` : 'Warnings: none');
+  }
+
+  return 0;
+}
+
+function hookInstallCommand(ctx, opts) {
+  const tool = opts.tool || 'all';
+  const userHome = userHomePath(ctx, opts);
+  const configHome = configHomePath(ctx, opts, userHome);
+  const command = opts.command || ctx.env.AWARENESS_COMMAND || 'awareness';
+  const home = opts.home || ctx.env.AGENTS_HOME ? agentsHome(ctx, opts) : null;
+  const installed = [];
+  const existing = [];
+
+  for (const target of expandTargets(tool, ['codex', 'claude', 'opencode'])) {
+    if (target === 'codex') installed.push(installCodexHooks(userHome, command, home));
+    if (target === 'claude') installed.push(installClaudeHooks(userHome, command, home));
+    if (target === 'opencode') {
+      const result = installOpenCodePlugin(configHome, command, home, Boolean(opts.overwrite));
+      if (result.status === 'existing') existing.push(result.file);
+      else installed.push(result.file);
+    }
+  }
+
+  out(ctx, `Hook install target: ${tool}`);
+  out(ctx, `Installed or updated: ${installed.length ? installed.join(', ') : 'none'}`);
+  if (existing.length) out(ctx, `Existing custom files left untouched: ${existing.join(', ')}`);
+  if (!path.isAbsolute(command)) {
+    out(ctx, `Warning: command is not absolute (${command}). Use --command "$(command -v awareness)" for launchd or restricted PATH environments.`);
+  }
+  return 0;
+}
+
+function scheduleCommand(ctx, subcommand, opts) {
+  switch (subcommand) {
+    case 'run':
+      return scheduleRunCommand(ctx, opts);
+    case 'install':
+      return scheduleInstallCommand(ctx, opts);
+    default:
+      err(ctx, `Unknown schedule command: ${subcommand || '(missing)'}`);
+      err(ctx, 'Use: awareness schedule run or awareness schedule install.');
+      return 1;
+  }
+}
+
+function scheduleRunCommand(ctx, opts) {
+  const home = agentsHome(ctx, opts);
+  const today = todayParts(ctx);
+  const cadence = required(opts, 'cadence');
+  if (!['hourly', 'daily'].includes(cadence)) throw new Error(`Invalid cadence: ${cadence}. Valid cadences: hourly, daily`);
+
+  ensurePrivateState(home, ctx);
+  const warnings = collectWarnings(home, today);
+  const eventFile = appendRuntimeEvent(home, today, 'schedule', {
+    source: 'schedule',
+    cadence,
+    warnings: warnings.length,
+  });
+
+  let evaluation = null;
+  if (cadence === 'daily') {
+    evaluation = writeEvaluationIfMissing(home, today);
+  }
+
+  out(ctx, `Schedule run complete: ${cadence}`);
+  out(ctx, `Runtime log: ${eventFile}`);
+  if (evaluation) out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
+  out(ctx, warnings.length ? `Warnings: ${warnings.length}` : 'Warnings: none');
+  return 0;
+}
+
+function scheduleInstallCommand(ctx, opts) {
+  const cadence = required(opts, 'cadence');
+  const cadences = expandTargets(cadence, ['hourly', 'daily']);
+  const userHome = userHomePath(ctx, opts);
+  const command = opts.command || ctx.env.AWARENESS_COMMAND || 'awareness';
+  const home = opts.home || ctx.env.AGENTS_HOME ? agentsHome(ctx, opts) : path.join(userHome, '.agents');
+  const launchAgentDir = path.join(userHome, 'Library', 'LaunchAgents');
+  const launchdLogDir = path.join(home, 'runtime', 'launchd');
+  const written = [];
+  const loaded = [];
+
+  ensureDir(launchAgentDir);
+  ensureDir(launchdLogDir);
+
+  for (const target of cadences) {
+    const file = path.join(launchAgentDir, `dev.fyso.awareness.${target}.plist`);
+    const args = [command, 'schedule', 'run', '--cadence', target];
+    if (home) args.push('--home', home);
+    const interval = target === 'hourly' ? 3600 : 86400;
+    fs.writeFileSync(file, launchAgentPlist({
+      label: `dev.fyso.awareness.${target}`,
+      args,
+      interval,
+      stdoutPath: path.join(launchdLogDir, `${target}.out.log`),
+      stderrPath: path.join(launchdLogDir, `${target}.err.log`),
+    }));
+    written.push(file);
+
+    if (opts.load) {
+      const result = loadLaunchAgent(file, `dev.fyso.awareness.${target}`);
+      if (result.status !== 0) {
+        throw new Error(`launchctl failed for ${file}: ${result.stderr || result.stdout || `exit ${result.status}`}`);
+      }
+      loaded.push(file);
+    }
+  }
+
+  out(ctx, `Schedule install target: ${cadence}`);
+  out(ctx, `LaunchAgents written: ${written.join(', ')}`);
+  out(ctx, `Loaded: ${loaded.length ? loaded.join(', ') : 'not requested'}`);
+  if (!path.isAbsolute(command)) {
+    out(ctx, `Warning: command is not absolute (${command}). launchd may not resolve shell PATH; prefer --command "$(command -v awareness)".`);
+  }
+  return 0;
+}
+
+function appendRuntimeEvent(home, today, category, record) {
+  const dir = path.join(home, 'runtime', category);
+  ensureDir(dir);
+  const file = path.join(dir, `${today.date}.jsonl`);
+  fs.appendFileSync(file, `${JSON.stringify({
+    timestamp: formatTimestamp(today),
+    ...record,
+  })}\n`);
+  return file;
+}
+
+function writeEvaluationIfMissing(home, today) {
+  const evaluationPath = path.join(home, 'evaluations', `${today.date}.md`);
+  if (fs.existsSync(evaluationPath)) {
+    return { file: evaluationPath, status: 'already exists' };
+  }
+
+  ensureDir(path.dirname(evaluationPath));
+  fs.writeFileSync(evaluationPath, buildEvaluation(home, today));
+  return { file: evaluationPath, status: 'written' };
+}
+
+function installCodexHooks(userHome, command, home) {
+  const file = path.join(userHome, '.codex', 'hooks.json');
+  const data = readJsonObject(file);
+  data.hooks ||= {};
+  addCommandHook(data, 'SessionStart', hookShellCommand(command, 'codex', 'session-start', home), 'startup|resume|clear|compact', 'Refreshing awareness');
+  addCommandHook(data, 'Stop', hookShellCommand(command, 'codex', 'stop', home), null, 'Recording awareness stop');
+  addCommandHook(data, 'PreCompact', hookShellCommand(command, 'codex', 'pre-compact', home), 'manual|auto', 'Recording pre-compact state');
+  addCommandHook(data, 'PostCompact', hookShellCommand(command, 'codex', 'post-compact', home), 'manual|auto', 'Recording post-compact state');
+  writeJsonObject(file, data);
+  return file;
+}
+
+function installClaudeHooks(userHome, command, home) {
+  const file = path.join(userHome, '.claude', 'settings.json');
+  const data = readJsonObject(file);
+  data.hooks ||= {};
+  addCommandHook(data, 'SessionStart', hookShellCommand(command, 'claude', 'session-start', home), 'startup|resume|clear|compact', 'Refreshing awareness');
+  addCommandHook(data, 'Stop', hookShellCommand(command, 'claude', 'stop', home), null, 'Recording awareness stop');
+  addCommandHook(data, 'SessionEnd', hookShellCommand(command, 'claude', 'session-end', home), 'clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other', 'Recording session end');
+  addCommandHook(data, 'PreCompact', hookShellCommand(command, 'claude', 'pre-compact', home), 'manual|auto', 'Recording pre-compact state');
+  addCommandHook(data, 'PostCompact', hookShellCommand(command, 'claude', 'post-compact', home), 'manual|auto', 'Recording post-compact state');
+  writeJsonObject(file, data);
+  return file;
+}
+
+function installOpenCodePlugin(configHome, command, home, overwrite) {
+  const file = path.join(configHome, 'opencode', 'plugins', 'awareness-framework.js');
+  const marker = 'Awareness Framework generated plugin';
+  if (fs.existsSync(file)) {
+    const existing = fs.readFileSync(file, 'utf8');
+    if (!existing.includes(marker) && !overwrite) {
+      return { file, status: 'existing' };
+    }
+  }
+
+  ensureDir(path.dirname(file));
+  fs.writeFileSync(file, openCodePluginContent({ command, home, marker }));
+  return { file, status: 'written' };
+}
+
+function addCommandHook(data, event, command, matcher, statusMessage) {
+  data.hooks[event] ||= [];
+  const alreadyExists = data.hooks[event].some((group) => Array.isArray(group.hooks)
+    && group.hooks.some((hook) => hook.type === 'command' && hook.command === command));
+  if (alreadyExists) return;
+
+  const group = {
+    hooks: [
+      {
+        type: 'command',
+        command,
+        timeout: 30,
+      },
+    ],
+  };
+  if (matcher) group.matcher = matcher;
+  if (statusMessage) group.hooks[0].statusMessage = statusMessage;
+  data.hooks[event].push(group);
+}
+
+function hookShellCommand(command, tool, event, home) {
+  const parts = [command, 'hook', 'run', '--tool', tool, '--event', event, '--quiet'];
+  if (home) parts.push('--home', home);
+  return parts.map(shellQuote).join(' ');
+}
+
+function openCodePluginContent({ command, home, marker }) {
+  const homeArgs = home ? ['--home', home] : [];
+  return `// ${marker}
+// Local private state is under ~/.agents by default. Do not commit runtime output.
+
+const awarenessCommand = ${JSON.stringify(command)};
+const homeArgs = ${JSON.stringify(homeArgs)};
+
+async function record(event) {
+  try {
+    const proc = Bun.spawn([
+      awarenessCommand,
+      "hook",
+      "run",
+      "--tool",
+      "opencode",
+      "--event",
+      event,
+      "--quiet",
+      ...homeArgs,
+    ], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    await proc.exited;
+  } catch {
+    // Hook failures must not block OpenCode sessions.
+  }
+}
+
+export const AwarenessFramework = async () => ({
+  event: async ({ event }) => {
+    const type = event?.type;
+    if (type === "session.created" || type === "session.idle" || type === "session.compacted" || type === "session.error") {
+      await record(type);
+    }
+  },
+  "experimental.session.compacting": async (_input, output) => {
+    await record("experimental.session.compacting");
+    if (Array.isArray(output.context)) {
+      output.context.push("Awareness Framework: after compaction, refresh private state with awareness refresh when task state may have changed.");
+    }
+  },
+});
+`;
+}
+
+function launchAgentPlist({ label, args, interval, stdoutPath, stderrPath }) {
+  const argItems = args.map((arg) => `    <string>${escapeXml(arg)}</string>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${escapeXml(label)}</string>
+  <key>ProgramArguments</key>
+  <array>
+${argItems}
+  </array>
+  <key>StartInterval</key>
+  <integer>${interval}</integer>
+  <key>StandardOutPath</key>
+  <string>${escapeXml(stdoutPath)}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapeXml(stderrPath)}</string>
+</dict>
+</plist>
+`;
+}
+
+function loadLaunchAgent(file, label) {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  const target = uid === null ? 'gui/0' : `gui/${uid}`;
+  spawnSync('launchctl', ['bootout', target, file], { encoding: 'utf8' });
+  const bootstrap = spawnSync('launchctl', ['bootstrap', target, file], { encoding: 'utf8' });
+  if (bootstrap.status === 0) return bootstrap;
+  const output = `${bootstrap.stderr || ''}${bootstrap.stdout || ''}`;
+  if (/already loaded/i.test(output)) {
+    return spawnSync('launchctl', ['kickstart', '-k', `${target}/${label}`], { encoding: 'utf8' });
+  }
+  return bootstrap;
 }
 
 function personalityAppend(ctx, file, opts, kind) {
@@ -716,6 +1046,18 @@ function normalizeState(state) {
   return state;
 }
 
+function expandTargets(value, allowed) {
+  if (value === 'all') return allowed;
+  const targets = String(value).split(',').map((item) => item.trim()).filter(Boolean);
+  if (!targets.length) throw new Error(`Missing target. Valid targets: ${allowed.join(', ')}, all`);
+  for (const target of targets) {
+    if (!allowed.includes(target)) {
+      throw new Error(`Invalid target: ${target}. Valid targets: ${allowed.join(', ')}, all`);
+    }
+  }
+  return targets;
+}
+
 function required(opts, key) {
   if (!opts[key] || opts[key] === true) {
     throw new Error(`Missing required option: --${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`);
@@ -756,6 +1098,24 @@ function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+function readJsonObject(file) {
+  if (!fs.existsSync(file)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('root value must be an object');
+    }
+    return parsed;
+  } catch (error) {
+    throw new Error(`Could not parse JSON file ${file}: ${error.message}`);
+  }
+}
+
+function writeJsonObject(file, data) {
+  ensureDir(path.dirname(file));
+  fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+}
+
 function todayParts(ctx) {
   const now = ctx.env.AWARENESS_NOW ? new Date(ctx.env.AWARENESS_NOW) : new Date();
   if (Number.isNaN(now.getTime())) throw new Error(`Invalid AWARENESS_NOW value: ${ctx.env.AWARENESS_NOW}`);
@@ -781,6 +1141,20 @@ function formatTimestamp(parts) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function shellQuote(value) {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
 }
 
 function out(ctx, message) {

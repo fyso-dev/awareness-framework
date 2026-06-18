@@ -73,6 +73,7 @@ Creates:
 - `memory/patterns.md`
 - `memory/long-term.md`
 - `evaluations/`
+- `runtime/`
 
 Create regular wrapper files for Codex, Claude Code, OpenCode, and Pi:
 
@@ -166,6 +167,72 @@ awareness evaluate --force
 ```
 
 The CLI does not automatically change the framework. Repeated findings should become reviewed framework changes.
+
+### `hook run`
+
+Records a lightweight lifecycle event from an agent CLI hook.
+
+```bash
+awareness hook run --tool codex --event session-start
+awareness hook run --tool claude --event pre-compact --quiet
+awareness hook run --tool opencode --event session.idle
+```
+
+This writes JSON lines under:
+
+```text
+~/.agents/runtime/hooks/YYYY-MM-DD.jsonl
+```
+
+Hook events do not append to the daily worklog. Use `awareness log` for human-relevant progress.
+
+### `hook install`
+
+Installs supported hook integrations.
+
+```bash
+awareness hook install --tool all --command "$(command -v awareness)"
+awareness hook install --tool codex --command "$(command -v awareness)"
+awareness hook install --tool claude --command "$(command -v awareness)"
+awareness hook install --tool opencode --command "$(command -v awareness)"
+```
+
+Generated files:
+
+- `~/.codex/hooks.json`
+- `~/.claude/settings.json`
+- `~/.config/opencode/plugins/awareness-framework.js`
+
+Use an absolute `--command` path when hooks run outside an interactive shell.
+
+For OpenCode, `--overwrite` replaces an existing non-generated plugin file. Use it only when that file is intentionally managed by this framework.
+
+### `schedule run`
+
+Runs periodic maintenance.
+
+```bash
+awareness schedule run --cadence hourly
+awareness schedule run --cadence daily
+```
+
+Hourly runs record warnings under `runtime/schedule/`. Daily runs also create `evaluations/YYYY-MM-DD.md` if it does not exist.
+
+### `schedule install`
+
+Installs macOS LaunchAgents for global periodic execution.
+
+```bash
+awareness schedule install --cadence all --command "$(command -v awareness)"
+awareness schedule install --cadence all --command "$(command -v awareness)" --load
+```
+
+Generated files:
+
+- `~/Library/LaunchAgents/dev.fyso.awareness.hourly.plist`
+- `~/Library/LaunchAgents/dev.fyso.awareness.daily.plist`
+
+See [Hooks and Scheduling](hooks-and-scheduling.md) for tool-specific notes.
 
 ## Personality Commands
 

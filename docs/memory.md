@@ -40,6 +40,15 @@ The daily episodic file is:
 ~/.agents/worklog/YYYY-MM-DD.md
 ```
 
+Runtime automation events are stored separately:
+
+```text
+~/.agents/runtime/hooks/YYYY-MM-DD.jsonl
+~/.agents/runtime/schedule/YYYY-MM-DD.jsonl
+```
+
+Runtime events are useful for diagnostics. They are not a replacement for worklog entries because they usually do not contain human-relevant progress.
+
 ## Long-Term Memory
 
 Long-term memory is curated. It should contain stable information that improves future collaboration.
@@ -80,6 +89,8 @@ Information should move from short-term to long-term only when it earns promotio
 4. Promote: add it to long-term memory only if it is repeated, user-confirmed, or operationally important.
 5. Prune: remove or soften memory that becomes stale, wrong, noisy, or harmful.
 
+Hooks and scheduled maintenance may perform steps 1 and 2 by recording observations, warnings, or evaluation notes. They must not perform step 4 silently.
+
 ## Promotion Rules
 
 - Promote explicit user preferences immediately when they affect future collaboration.
@@ -107,6 +118,12 @@ Before handoff:
 - Keep `current.md` compact.
 - Append concrete evidence to the worklog.
 - If a new long-term preference was confirmed, promote it explicitly.
+
+Scheduled maintenance:
+
+- Hourly checks may flag stale awareness or missing daily files.
+- Daily checks may create `evaluations/YYYY-MM-DD.md`.
+- Memory promotion remains an explicit action after reviewing evidence.
 
 ## Memory Quality Checks
 

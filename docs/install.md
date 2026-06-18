@@ -56,6 +56,7 @@ This creates missing files under `~/.agents/`:
   memory/patterns.md
   memory/long-term.md
   evaluations/
+  runtime/
 ```
 
 Existing files are not overwritten.
@@ -110,6 +111,49 @@ Before handoff:
 awareness handoff
 ```
 
+## Optional Hook Installation
+
+Wrappers tell agents what to read. Hooks make supported tools run the maintenance commands at lifecycle boundaries.
+
+Install hooks for Codex, Claude Code, and OpenCode:
+
+```bash
+awareness hook install --tool all --command "$(command -v awareness)"
+```
+
+Generated files:
+
+```text
+~/.codex/hooks.json
+~/.claude/settings.json
+~/.config/opencode/plugins/awareness-framework.js
+```
+
+Codex requires configured command hooks to be reviewed and trusted from `/hooks` before they run.
+
+## Optional Global Schedule
+
+On macOS, install hourly and daily user LaunchAgents:
+
+```bash
+awareness schedule install --cadence all --command "$(command -v awareness)"
+```
+
+Load them immediately:
+
+```bash
+awareness schedule install --cadence all --command "$(command -v awareness)" --load
+```
+
+Generated files:
+
+```text
+~/Library/LaunchAgents/dev.fyso.awareness.hourly.plist
+~/Library/LaunchAgents/dev.fyso.awareness.daily.plist
+```
+
+Hourly runs record private health events. Daily runs create the evaluation note if missing.
+
 ## Custom Paths
 
 Use a custom private awareness home:
@@ -151,6 +195,13 @@ awareness init --wrappers
 
 Use `--overwrite-wrappers` only when you want the framework to replace existing wrapper files.
 
+Refresh hooks and schedules after upgrading when command paths or hook definitions changed:
+
+```bash
+awareness hook install --tool all --command "$(command -v awareness)"
+awareness schedule install --cadence all --command "$(command -v awareness)"
+```
+
 ## Uninstall
 
 Remove the global CLI:
@@ -159,7 +210,7 @@ Remove the global CLI:
 npm uninstall -g @fyso/awareness-framework
 ```
 
-This does not delete private state under `~/.agents/` or wrapper files.
+This does not delete private state under `~/.agents/`, wrapper files, hooks, or LaunchAgents.
 
 ## Development Install
 

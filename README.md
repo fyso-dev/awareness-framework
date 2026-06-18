@@ -48,6 +48,9 @@ Personality is treated as a private operating profile: continuity, voice, contex
     long-term.md
   evaluations/
     YYYY-MM-DD.md
+  runtime/
+    hooks/
+    schedule/
 ```
 
 ## Method
@@ -67,6 +70,7 @@ Personality is treated as a private operating profile: continuity, voice, contex
 - [Private State](docs/private-state.md)
 - [Evaluation Loop](docs/evaluation-loop.md)
 - [Memory Model](docs/memory.md)
+- [Hooks and Scheduling](docs/hooks-and-scheduling.md)
 - [CLI](docs/cli.md)
 - [Personality](docs/personality.md)
 - [Adoption Guide](docs/adoption.md)
@@ -92,6 +96,8 @@ awareness init --wrappers
 awareness status
 awareness refresh
 awareness check
+awareness hook install --tool all --command "$(command -v awareness)"
+awareness schedule install --cadence all --command "$(command -v awareness)"
 ```
 
 The CLI only reads and writes private local files. It does not post to Jira, GitHub, or any external system.
