@@ -127,6 +127,7 @@ function initCommand(ctx, opts) {
   writeIfMissing(path.join(home, 'memory', 'personality.md'), readTemplate('personality.md'), created, existing);
   writeIfMissing(path.join(home, 'memory', 'preferences.md'), privateMemorySeed('Preferences'), created, existing);
   writeIfMissing(path.join(home, 'memory', 'patterns.md'), privateMemorySeed('Patterns'), created, existing);
+  writeIfMissing(path.join(home, 'memory', 'long-term.md'), readTemplate('memory-long-term.md'), created, existing);
 
   if (opts.wrappers) {
     writeWrappers({
@@ -526,6 +527,7 @@ function ensurePrivateState(home, ctx) {
   if (!fs.existsSync(awarenessPath(home))) fs.writeFileSync(awarenessPath(home), initialAwareness(today));
   if (!fs.existsSync(path.join(home, 'worklog', `${today.date}.md`))) fs.writeFileSync(path.join(home, 'worklog', `${today.date}.md`), dailyWorklog(today.date));
   if (!fs.existsSync(personalityPath(home))) fs.writeFileSync(personalityPath(home), readTemplate('personality.md'));
+  if (!fs.existsSync(path.join(home, 'memory', 'long-term.md'))) fs.writeFileSync(path.join(home, 'memory', 'long-term.md'), readTemplate('memory-long-term.md'));
 }
 
 function replaceSection(content, section, body) {

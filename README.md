@@ -45,6 +45,7 @@ Personality is treated as a private operating profile: continuity, voice, contex
   memory/
     preferences.md
     patterns.md
+    long-term.md
   evaluations/
     YYYY-MM-DD.md
 ```
@@ -65,6 +66,7 @@ Personality is treated as a private operating profile: continuity, voice, contex
 - [Lifecycle](docs/lifecycle.md)
 - [Private State](docs/private-state.md)
 - [Evaluation Loop](docs/evaluation-loop.md)
+- [Memory Model](docs/memory.md)
 - [CLI](docs/cli.md)
 - [Personality](docs/personality.md)
 - [Adoption Guide](docs/adoption.md)
