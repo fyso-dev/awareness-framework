@@ -31,6 +31,8 @@ This repository contains the framework, templates, and governance rules. It must
 | Personal memory | No | Durable private preferences and patterns |
 | Evaluation notes | No by default | Private observations used to propose framework improvements |
 
+Personality is treated as a private operating profile: continuity, voice, context sensitivity, bounded initiative, and honest repair. It must not become fake emotion, fake identity, or hidden autonomy.
+
 ## Recommended Private Layout
 
 ```text
