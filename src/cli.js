@@ -434,6 +434,11 @@ function hookCommand(ctx, subcommand, opts) {
   }
 }
 
+// Events whose stdout the host agent injects into its context. For these we
+// always emit the Current Focus so the agent actually loads the protocol state,
+// even under --quiet (which only suppresses diagnostic noise, not the payload).
+const CONTEXT_INJECTION_EVENTS = new Set(['session-start', 'post-compact']);
+
 function hookRunCommand(ctx, opts) {
   const home = agentsHome(ctx, opts);
   const today = todayParts(ctx);
@@ -455,7 +460,25 @@ function hookRunCommand(ctx, opts) {
     out(ctx, warnings.length ? `Warnings: ${warnings.length}` : 'Warnings: none');
   }
 
+  if (CONTEXT_INJECTION_EVENTS.has(event)) {
+    emitFocusContext(ctx, home);
+  }
+
   return 0;
+}
+
+// Print the Current Focus as injectable context for the host agent. Framed as
+// an instruction so the agent treats it as actionable, not background noise.
+function emitFocusContext(ctx, home) {
+  const currentPath = awarenessPath(home);
+  if (!fs.existsSync(currentPath)) return;
+  const focus = extractSection(fs.readFileSync(currentPath, 'utf8'), 'Current Focus').trim();
+  if (!focus) return;
+  out(ctx, '[awareness] Load this before doing work — current focus:');
+  out(ctx, '');
+  out(ctx, focus);
+  out(ctx, '');
+  out(ctx, 'Follow the awareness protocol; run `awareness handoff` before yielding control.');
 }
 
 function hookInstallCommand(ctx, opts) {

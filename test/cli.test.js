@@ -240,6 +240,38 @@ test('hook run records a low-noise runtime event', () => {
   assert.equal(entry.event, 'session-start');
 });
 
+test('hook run emits current focus as injectable context on session-start even when quiet', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run(['focus',
+    '--task', 'ETP-1',
+    '--summary', 'Wire the regen pipeline',
+    '--repo', 'schema-forge',
+    '--branch', 'feature/ETP-1',
+    '--next', 'Run make regen and verify contract',
+  ], home);
+
+  const result = run(['hook', 'run', '--tool', 'claude', '--event', 'session-start', '--quiet'], home);
+
+  assert.equal(result.code, 0);
+  // --quiet suppresses diagnostic noise but NOT the context payload.
+  assert.doesNotMatch(result.stdout, /Hook recorded/);
+  assert.match(result.stdout, /\[awareness\] Load this before doing work/);
+  assert.match(result.stdout, /ETP-1/);
+  assert.match(result.stdout, /Run make regen and verify contract/);
+  assert.match(result.stdout, /awareness handoff/);
+});
+
+test('hook run does not emit focus context on non-injection events', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['hook', 'run', '--tool', 'claude', '--event', 'stop', '--quiet'], home);
+
+  assert.equal(result.code, 0);
+  assert.doesNotMatch(result.stdout, /\[awareness\] Load this before doing work/);
+});
+
 test('hook install writes Codex, Claude, and OpenCode integration files', () => {
   const home = tempHome();
   const userHome = tempHome();

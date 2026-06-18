@@ -31,12 +31,18 @@ These files are private operational state. Do not commit them.
 
 | Lifecycle point | Command | Purpose |
 |-----------------|---------|---------|
-| Session start or resume | `awareness hook run --tool TOOL --event session-start` | Ensure private files exist and record that the agent refreshed awareness. |
+| Session start or resume | `awareness hook run --tool TOOL --event session-start` | Ensure private files exist, record that the agent refreshed awareness, and print the Current Focus so the host injects it as context. |
 | Stop or session end | `awareness hook run --tool TOOL --event stop` | Record that the agent reached an idle or handoff boundary. |
 | Pre-compaction | `awareness hook run --tool TOOL --event pre-compact` | Record a compaction boundary before context is summarized. |
-| Post-compaction | `awareness hook run --tool TOOL --event post-compact` | Record that the new compacted context may need `awareness refresh`. |
+| Post-compaction | `awareness hook run --tool TOOL --event post-compact` | Record that the new compacted context may need `awareness refresh`, and re-print the Current Focus so it survives compaction. |
 
 Hooks should not append daily worklog entries on every lifecycle event. The worklog is for human-relevant progress with task IDs and evidence.
+
+## Context Injection
+
+`session-start` and `post-compact` are **context-injection events**: hosts such as Claude Code append the hook's stdout to the agent's context. For these events `awareness hook run` always prints the `Current Focus` block (framed as a load-this-first instruction), so the agent actively loads its focus instead of relying on a passive, possibly stale file import.
+
+`--quiet` only suppresses the diagnostic lines (`Hook recorded`, `Runtime log`, `Warnings`). It does **not** suppress the focus payload — the installed hooks pass `--quiet` precisely so the only thing reaching the agent's context is the focus itself. Non-injection events (`stop`, `session-end`, `pre-compact`) never print the focus.
 
 ## Scheduled Cadence
 
