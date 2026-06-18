@@ -15,6 +15,13 @@ Create private files outside this repository:
 
 Copy the templates from `templates/` into private state and adapt paths for the operator.
 
+Alternatively, use the helper CLI:
+
+```bash
+npm install -g git+https://github.com/fyso-dev/awareness-framework.git
+awareness init
+```
+
 ## Agent Instruction Pattern
 
 Use one canonical private instruction file:

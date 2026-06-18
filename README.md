@@ -9,12 +9,13 @@ This repository contains the framework, templates, and governance rules. It must
 - A methodology for agent-assisted work.
 - A shared vocabulary for awareness, worklog, handoff, and evaluation.
 - A set of templates that can be copied into private local state.
+- An optional helper CLI that maintains and checks private state.
 - A reviewable process for improving the methodology over time.
 
 ## What This Is Not
 
 - Not a task manager.
-- Not a CLI tool.
+- Not dependent on a CLI tool.
 - Not a Jira replacement.
 - Not a vector memory product.
 - Not a place to store private operational state.
@@ -61,6 +62,8 @@ This repository contains the framework, templates, and governance rules. It must
 - [Lifecycle](docs/lifecycle.md)
 - [Private State](docs/private-state.md)
 - [Evaluation Loop](docs/evaluation-loop.md)
+- [CLI](docs/cli.md)
+- [Personality](docs/personality.md)
 - [Adoption Guide](docs/adoption.md)
 - [Governance](docs/governance.md)
 
@@ -73,3 +76,15 @@ This repository contains the framework, templates, and governance rules. It must
 - [End-of-day summary](templates/end-of-day-summary.md)
 - [Evaluation note](templates/evaluation-note.md)
 - [Framework improvement proposal](templates/framework-improvement-proposal.md)
+- [Personality profile](templates/personality.md)
+
+## CLI Quick Start
+
+```bash
+npm install -g git+https://github.com/fyso-dev/awareness-framework.git
+awareness init
+awareness status
+awareness check
+```
+
+The CLI only reads and writes private local files. It does not post to Jira, GitHub, or any external system.

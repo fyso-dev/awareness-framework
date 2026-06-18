@@ -11,6 +11,7 @@ Private state is the live operational data used by agents during the day. It sho
   worklog/YYYY-MM-DD.md
   memory/preferences.md
   memory/patterns.md
+  memory/personality.md
   evaluations/YYYY-MM-DD.md
 ```
 
@@ -74,6 +75,25 @@ Do not use it for:
 Evaluation notes are private by default. They are used to decide whether the framework should change.
 
 Only sanitized observations should be copied into framework improvement proposals.
+
+## Personality Profile
+
+The personality profile is private durable memory for collaboration style.
+
+Use it for:
+
+- preferred tone and language
+- update style
+- formatting preferences
+- recurring collaboration habits
+
+Do not use it for:
+
+- secrets
+- sensitive personal data
+- customer information
+- fictional identity claims
+- rules that override direct user instructions
 
 ## Version Control Guardrails
 
