@@ -18,7 +18,7 @@ Copy the templates from `templates/` into private state and adapt paths for the 
 Alternatively, use the helper CLI:
 
 ```bash
-npm install -g git+https://github.com/fyso-dev/awareness-framework.git
+npm install -g @fyso/awareness-framework
 awareness init
 awareness init --wrappers
 ```
