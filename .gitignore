@@ -1,0 +1,12 @@
+.DS_Store
+
+# Private runtime state. Keep real awareness, worklogs, evaluations, and memory
+# outside this repository.
+.agents/
+awareness/
+worklog/
+worklogs/
+memory/
+evaluations/
+*.local.md
+*.private.md
