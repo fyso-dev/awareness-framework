@@ -40,6 +40,26 @@ or:
 AGENTS_HOME=/path/to/private/agents awareness status
 ```
 
+Use channel-scoped state for multi-channel integrations:
+
+```bash
+awareness status --channel support
+```
+
+This resolves to:
+
+```text
+~/.agents/channels/support/
+```
+
+Use `--agent-folder` as a clearer alias when the path is a base folder:
+
+```bash
+awareness status --agent-folder /path/to/agents --channel support
+```
+
+User memory is narrow and separate from the channel context. It lives under `memory/users/` inside the selected channel or base folder.
+
 ## Session Bootstrap vs Operational Refresh
 
 Instruction-file imports are a bootstrap mechanism. They can load a snapshot of `current.md` at session start, but they do not guarantee that an agent sees updates made later by another agent.
@@ -233,6 +253,39 @@ Generated files:
 - `~/Library/LaunchAgents/dev.fyso.awareness.daily.plist`
 
 See [Hooks and Scheduling](hooks-and-scheduling.md) for tool-specific notes.
+
+### `user show`
+
+Shows narrow memory for a user. If `--channel` is provided, memory is read from that channel's private state.
+
+```bash
+awareness user show --user user-123
+awareness user show --channel support --user user-123
+```
+
+### `user note`
+
+Appends a small evidence-backed fact about a user.
+
+```bash
+awareness user note \
+  --channel support \
+  --user user-123 \
+  --kind question \
+  --text "Asked how worklog automation should be organized" \
+  --evidence "Message link or timestamp"
+```
+
+Supported kinds:
+
+- `nickname`
+- `question`
+- `topic`
+- `preference`
+- `fact`
+- `note`
+
+User notes do not create a full awareness workspace for that user. Channel context remains in `awareness/` and `worklog/`; user memory remains in `memory/users/<user>.md`.
 
 ## Personality Commands
 

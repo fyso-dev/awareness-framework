@@ -5,12 +5,13 @@ import path from 'node:path';
 import test from 'node:test';
 import { runCli } from '../src/cli.js';
 
-function run(argv, home) {
+function run(argv, home, env = {}) {
   let stdout = '';
   let stderr = '';
   const code = runCli([...argv, '--home', home], {
     env: {
       ...process.env,
+      ...env,
       AWARENESS_NOW: '2099-01-02T12:34:00.000Z',
     },
     stdout: { write: (chunk) => { stdout += chunk; } },
@@ -33,6 +34,7 @@ test('init creates private awareness files', () => {
   assert.equal(fs.existsSync(path.join(home, 'worklog', '2099-01-02.md')), true);
   assert.equal(fs.existsSync(path.join(home, 'memory', 'personality.md')), true);
   assert.equal(fs.existsSync(path.join(home, 'memory', 'long-term.md')), true);
+  assert.equal(fs.existsSync(path.join(home, 'memory', 'users')), true);
 });
 
 test('init can create regular wrapper files without overwriting existing files', () => {
@@ -55,6 +57,62 @@ test('init can create regular wrapper files without overwriting existing files',
 
   assert.equal(overwrite.code, 0);
   assert.match(fs.readFileSync(codexWrapper, 'utf8'), /@.+AGENTS\.md/);
+});
+
+test('channel scope stores private files under a channel-specific folder', () => {
+  const home = tempHome();
+
+  const result = run(['init', '--channel', '#Support Desk'], home);
+
+  assert.equal(result.code, 0);
+  const scopedHome = path.join(home, 'channels', 'support-desk');
+  assert.equal(fs.existsSync(path.join(scopedHome, 'AGENTS.md')), true);
+  assert.equal(fs.existsSync(path.join(scopedHome, 'awareness', 'current.md')), true);
+  assert.equal(fs.existsSync(path.join(home, 'awareness', 'current.md')), false);
+
+  const status = run(['status', '--channel', '#Support Desk'], home);
+  assert.match(status.stdout, /channels\/support-desk/);
+});
+
+test('user memory stores small user facts without changing the context home', () => {
+  const home = tempHome();
+
+  const result = run([
+    'user',
+    'note',
+    '--user', '@User One',
+    '--kind', 'nickname',
+    '--text', 'Ace',
+    '--evidence', 'User interaction',
+  ], home);
+
+  assert.equal(result.code, 0);
+  const userMemory = path.join(home, 'memory', 'users', 'user-one.md');
+  assert.equal(fs.existsSync(userMemory), true);
+  assert.match(fs.readFileSync(userMemory, 'utf8'), /## Nicknames/);
+  assert.match(fs.readFileSync(userMemory, 'utf8'), /Ace/);
+  assert.equal(fs.existsSync(path.join(home, 'users', 'user-one', 'awareness', 'current.md')), false);
+});
+
+test('user memory can live inside a channel-scoped context', () => {
+  const home = tempHome();
+
+  const result = run([
+    'user',
+    'note',
+    '--channel', 'Help Desk',
+    '--user', '1234567890',
+    '--kind', 'question',
+    '--text', 'Asked how to connect the bot to Jira',
+    '--evidence', 'Message link',
+  ], home);
+
+  assert.equal(result.code, 0);
+  const scopedMemory = path.join(home, 'channels', 'help-desk', 'memory', 'users', '1234567890.md');
+  assert.equal(fs.existsSync(scopedMemory), true);
+  assert.match(fs.readFileSync(scopedMemory, 'utf8'), /## Questions/);
+  assert.match(fs.readFileSync(scopedMemory, 'utf8'), /bot to Jira/);
+  assert.equal(fs.existsSync(path.join(home, 'channels', 'help-desk', 'users', '1234567890')), false);
 });
 
 test('focus updates awareness and appends worklog', () => {
@@ -211,6 +269,27 @@ test('hook install writes Codex, Claude, and OpenCode integration files', () => 
   assert.match(plugin, /session\.created/);
 });
 
+test('hook install pins scoped homes into generated commands', () => {
+  const home = tempHome();
+  const userHome = tempHome();
+
+  const result = run([
+    'hook',
+    'install',
+    '--tool', 'codex',
+    '--user-home', userHome,
+    '--command', '/usr/local/bin/awareness',
+    '--channel', 'Support',
+    '--user', 'alice',
+  ], home);
+
+  assert.equal(result.code, 0);
+  const codexHooks = JSON.parse(fs.readFileSync(path.join(userHome, '.codex', 'hooks.json'), 'utf8'));
+  assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /--home/);
+  assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /channels\/support/);
+  assert.doesNotMatch(codexHooks.hooks.SessionStart[0].hooks[0].command, /users\/alice/);
+});
+
 test('schedule run daily writes runtime event and daily evaluation', () => {
   const home = tempHome();
   run(['init'], home);
@@ -242,4 +321,24 @@ test('schedule install writes macOS LaunchAgents for hourly and daily maintenanc
   assert.match(daily, /<integer>86400<\/integer>/);
   assert.match(hourly, /--cadence/);
   assert.match(hourly, /hourly/);
+});
+
+test('schedule install uses scoped LaunchAgent labels when channel is set', () => {
+  const home = tempHome();
+  const userHome = tempHome();
+  run(['init'], home);
+
+  const result = run([
+    'schedule',
+    'install',
+    '--cadence', 'hourly',
+    '--user-home', userHome,
+    '--command', '/usr/local/bin/awareness',
+    '--channel', 'Support',
+  ], home);
+
+  assert.equal(result.code, 0);
+  const plist = fs.readFileSync(path.join(userHome, 'Library', 'LaunchAgents', 'dev.fyso.awareness.support.hourly.plist'), 'utf8');
+  assert.match(plist, /dev\.fyso\.awareness\.support\.hourly/);
+  assert.match(plist, /channels\/support/);
 });

@@ -46,11 +46,19 @@ Personality is treated as a private operating profile: continuity, voice, contex
     preferences.md
     patterns.md
     long-term.md
+    users/
+      <user>.md
   evaluations/
     YYYY-MM-DD.md
   runtime/
     hooks/
     schedule/
+  channels/
+    <channel>/
+      awareness/
+      worklog/
+      memory/
+        users/
 ```
 
 ## Method
@@ -70,6 +78,7 @@ Personality is treated as a private operating profile: continuity, voice, contex
 - [Private State](docs/private-state.md)
 - [Evaluation Loop](docs/evaluation-loop.md)
 - [Memory Model](docs/memory.md)
+- [Multi-User Scoping](docs/multi-user-scoping.md)
 - [Hooks and Scheduling](docs/hooks-and-scheduling.md)
 - [CLI](docs/cli.md)
 - [Personality](docs/personality.md)

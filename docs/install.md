@@ -55,11 +55,35 @@ This creates missing files under `~/.agents/`:
   memory/preferences.md
   memory/patterns.md
   memory/long-term.md
+  memory/users/
   evaluations/
   runtime/
 ```
 
 Existing files are not overwritten.
+
+Initialize a channel-scoped state folder:
+
+```bash
+awareness init --channel support
+```
+
+This creates missing files under:
+
+```text
+~/.agents/channels/support/
+```
+
+Record narrow user memory inside the selected channel:
+
+```bash
+awareness user note \
+  --channel support \
+  --user user-123 \
+  --kind topic \
+  --text "Has been discussing worklog automation" \
+  --evidence "Message link or timestamp"
+```
 
 ## Initialize Agent Wrappers
 

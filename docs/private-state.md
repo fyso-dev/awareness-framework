@@ -13,9 +13,14 @@ Private state is the live operational data used by agents during the day. It sho
   memory/patterns.md
   memory/personality.md
   memory/long-term.md
+  memory/users/<user>.md
   evaluations/YYYY-MM-DD.md
   runtime/hooks/YYYY-MM-DD.jsonl
   runtime/schedule/YYYY-MM-DD.jsonl
+  channels/<channel>/
+    awareness/current.md
+    worklog/YYYY-MM-DD.md
+    memory/users/<user>.md
 ```
 
 ## Awareness Board
@@ -66,6 +71,7 @@ Use it for:
 - stable project context
 - repeated review guidance
 - durable collaboration rules
+- narrow participant memory such as nicknames, repeated questions, topics, and explicit preferences
 
 Do not use it for:
 
@@ -75,6 +81,19 @@ Do not use it for:
 - raw chat transcripts
 
 See [Memory Model](memory.md) for the short-term, episodic, and long-term memory lifecycle.
+
+## Channel Scope
+
+Channel-scoped state isolates context for multi-channel integrations.
+
+Use it for:
+
+- per-channel awareness
+- per-channel worklogs
+- per-channel evaluations
+- per-channel user memory
+
+Do not use it to create a full workspace per user. User memory should stay narrow under `memory/users/<user>.md`.
 
 ## Evaluation Notes
 
