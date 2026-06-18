@@ -54,6 +54,7 @@ This creates missing files under `~/.agents/`:
   memory/personality.md
   memory/preferences.md
   memory/patterns.md
+  memory/long-term.md
   evaluations/
 ```
 

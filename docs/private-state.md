@@ -12,6 +12,7 @@ Private state is the live operational data used by agents during the day. It sho
   memory/preferences.md
   memory/patterns.md
   memory/personality.md
+  memory/long-term.md
   evaluations/YYYY-MM-DD.md
 ```
 
@@ -62,6 +63,7 @@ Use it for:
 - recurring working patterns
 - stable project context
 - repeated review guidance
+- durable collaboration rules
 
 Do not use it for:
 
@@ -69,6 +71,8 @@ Do not use it for:
 - tokens
 - sensitive customer data
 - raw chat transcripts
+
+See [Memory Model](memory.md) for the short-term, episodic, and long-term memory lifecycle.
 
 ## Evaluation Notes
 

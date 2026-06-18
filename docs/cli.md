@@ -71,6 +71,7 @@ Creates:
 - `memory/personality.md`
 - `memory/preferences.md`
 - `memory/patterns.md`
+- `memory/long-term.md`
 - `evaluations/`
 
 Create regular wrapper files for Codex, Claude Code, OpenCode, and Pi:

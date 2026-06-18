@@ -10,6 +10,8 @@ Self-improvement means:
 4. review the change
 5. update the framework only after approval
 
+This loop evaluates both execution quality and memory quality. A good evaluation decides whether the next action is a local habit change, a short-term awareness cleanup, a long-term memory update, a template adjustment, or a framework PR.
+
 ## Boundary
 
 | Can happen automatically | Requires human review |
@@ -28,6 +30,20 @@ Self-improvement means:
 | Handoff | Can another agent continue from private files alone? |
 | End of day | Can the day be summarized by task ID with evidence? |
 | Weekly | Did recurring failures justify a framework change? |
+
+## Self-Evaluation Dimensions
+
+Evaluate the agent as a collaborator, not only the files.
+
+| Dimension | Question |
+|-----------|----------|
+| Task execution | Did the agent make correct, useful progress toward the user's goal? |
+| Awareness hygiene | Is `current.md` compact, fresh, and useful for the next agent? |
+| Worklog quality | Can the day be reconstructed with task IDs and evidence? |
+| Memory quality | Did anything deserve promotion to long-term memory or pruning from it? |
+| Personality fit | Did the agent preserve continuity, voice, context sensitivity, and honest repair? |
+| Tool reliability | Did CLI commands and checks reduce context burden or add friction? |
+| Framework feedback | Did repeated friction suggest a versioned methodology change? |
 
 ## Signals
 
@@ -65,7 +81,34 @@ Scores are diagnostic. A low score should produce a targeted improvement proposa
 - Convert repeated user corrections into template improvements.
 - Keep the awareness board optimized for next action.
 - Keep the worklog optimized for evidence.
+- Promote short-term observations to long-term memory only when user-confirmed, repeated, or operationally important.
+- Prune memory that becomes stale, noisy, sensitive, or contradicted by direct user instructions.
 - Change the framework through reviewed commits or pull requests.
+
+## Improvement Routing
+
+| Finding | Route |
+|---------|-------|
+| Current focus stale | Update `awareness/current.md` |
+| Missing evidence | Append or correct the daily worklog |
+| Repeated preference | Promote to `memory/preferences.md` or `memory/long-term.md` |
+| Collaboration style correction | Update `memory/personality.md` |
+| Repeated workflow friction | Propose a template or docs PR |
+| Sensitive or stale memory | Prune private memory |
+| Tool command confusion | Improve CLI docs or command behavior |
+
+## Evaluation Output
+
+Each evaluation should end with one of these outcomes:
+
+- No change.
+- Clean up awareness.
+- Append missing evidence.
+- Promote memory.
+- Prune memory.
+- Adjust local habit.
+- Propose framework PR.
+- Ask user for confirmation.
 
 ## Example Outcomes
 
@@ -76,3 +119,5 @@ Scores are diagnostic. A low score should produce a targeted improvement proposa
 | Awareness board grows too large | Add an end-of-day cleanup step |
 | Test evidence is often missing | Make `Evidence` required in worklog entries |
 | Agents over-log trivial actions | Clarify which events deserve entries |
+| User repeats the same preference | Promote it to long-term memory |
+| Personality feels generic | Add or revise private personality traits |

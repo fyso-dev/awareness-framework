@@ -32,6 +32,7 @@ test('init creates private awareness files', () => {
   assert.equal(fs.existsSync(path.join(home, 'awareness', 'current.md')), true);
   assert.equal(fs.existsSync(path.join(home, 'worklog', '2099-01-02.md')), true);
   assert.equal(fs.existsSync(path.join(home, 'memory', 'personality.md')), true);
+  assert.equal(fs.existsSync(path.join(home, 'memory', 'long-term.md')), true);
 });
 
 test('init can create regular wrapper files without overwriting existing files', () => {
