@@ -38,6 +38,19 @@ or:
 AGENTS_HOME=/path/to/private/agents awareness status
 ```
 
+## Session Bootstrap vs Operational Refresh
+
+Instruction-file imports are a bootstrap mechanism. They can load a snapshot of `current.md` at session start, but they do not guarantee that an agent sees updates made later by another agent.
+
+Use the CLI as the operational refresh and maintenance layer:
+
+- At session start, run `awareness status` or `awareness check` when the CLI is available.
+- If the session may be stale because another agent worked in parallel, run `awareness refresh`.
+- Before handoff, run `awareness handoff` or `awareness check`.
+- When changing state, prefer `awareness focus` and `awareness log` over manual edits.
+
+If the CLI is not available, read `~/.agents/awareness/current.md` directly.
+
 ## Commands
 
 ### `init`
@@ -64,6 +77,14 @@ Shows the current focus and warnings.
 
 ```bash
 awareness status
+```
+
+### `refresh`
+
+Reloads the awareness board from disk and prints the current status. This is an alias for `status` with a name that makes the cross-agent refresh intent explicit.
+
+```bash
+awareness refresh
 ```
 
 ### `check`

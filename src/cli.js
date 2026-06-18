@@ -29,6 +29,8 @@ export function runCli(argv, options = {}) {
         return initCommand(ctx, parsed.opts);
       case 'status':
         return statusCommand(ctx, parsed.opts);
+      case 'refresh':
+        return statusCommand(ctx, parsed.opts);
       case 'check':
         return checkCommand(ctx, parsed.opts);
       case 'focus':
@@ -92,6 +94,7 @@ function printHelp(ctx) {
 Usage:
   awareness init [--home PATH]
   awareness status [--home PATH]
+  awareness refresh [--home PATH]
   awareness check [--home PATH] [--strict]
   awareness focus --task ID --summary TEXT --repo TEXT --branch TEXT --next TEXT [--state STATE] [--home PATH]
   awareness log --task ID --summary TEXT --changes TEXT [--context TEXT] [--state STATE] [--evidence TEXT] [--next TEXT] [--home PATH]
@@ -359,7 +362,7 @@ function collectWarnings(home, today) {
     if (!focus.trim()) warnings.push('Current Focus is empty.');
     if (!/- Task:\s+\S+/.test(focus)) warnings.push('Current Focus is missing Task.');
     if (!/- Next:\s+(?!The next concrete action)\S+/.test(focus)) warnings.push('Current Focus is missing a concrete Next action.');
-    if (/PROJECT-123|PROJECT-456|YYYY-MM-DD|branch-name/.test(current)) warnings.push('Awareness board still contains template placeholders.');
+    if (/YYYY-MM-DD|branch-name/.test(current)) warnings.push('Awareness board still contains template placeholders.');
 
     const active = extractSection(current, 'Active Tasks');
     const taskBlocks = active

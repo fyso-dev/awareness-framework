@@ -49,10 +49,10 @@ This repository contains the framework, templates, and governance rules. It must
 
 ## Method
 
-1. At session start, the agent reads the private awareness board.
+1. At session start, the agent loads private awareness state. If the CLI is available, it runs `awareness status` or `awareness check`; otherwise it reads the private awareness board.
 2. When focus changes, the agent updates awareness and appends a task-switch worklog entry.
 3. When concrete progress happens, the agent appends a worklog entry with evidence.
-4. Before handoff, the agent leaves a clear current state and next action.
+4. Before handoff, or when parallel work may have changed state, the agent refreshes from disk and leaves a clear current state and next action.
 5. At end of day, the agent prepares a task-grouped summary for human review.
 6. During evaluation, the agent identifies process friction and proposes framework changes through PRs.
 
@@ -84,6 +84,7 @@ This repository contains the framework, templates, and governance rules. It must
 npm install -g git+https://github.com/fyso-dev/awareness-framework.git
 awareness init
 awareness status
+awareness refresh
 awareness check
 ```
 

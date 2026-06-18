@@ -40,6 +40,14 @@ Some agents support direct imports from instruction files. Others require explic
 
 Use a regular file for each wrapper. Avoid relying on symlinks unless the target CLI is known to resolve them correctly in the operator's environment.
 
+Direct imports and `@path` expansion should be treated as session-start snapshots. They are useful for bootstrap context, but they do not guarantee that the agent sees changes made by another agent later in the session.
+
+If the CLI is available, wrappers should instruct agents to use:
+
+- `awareness status` or `awareness check` at session start
+- `awareness refresh` before acting on possibly stale state
+- `awareness handoff` before returning control
+
 Example wrapper:
 
 ```markdown
@@ -50,6 +58,8 @@ Read and follow the canonical private protocol at:
 @/Users/example/.agents/AGENTS.md
 
 If your CLI does not expand `@` imports automatically, open that file explicitly before starting work.
+
+If the Awareness CLI is available, run `awareness status` or `awareness check` at session start, `awareness refresh` before acting on possibly stale state, and `awareness handoff` before returning control.
 ```
 
 ## External Systems

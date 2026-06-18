@@ -4,7 +4,18 @@ The lifecycle defines when agents read, update, and evaluate private awareness a
 
 ## 1. Initialization
 
-At the start of a session, the agent reads the private awareness board before acting.
+At the start of a session, the agent loads the private awareness state before acting.
+
+If the CLI is available, prefer:
+
+```bash
+awareness status
+awareness check
+```
+
+If the CLI is not available, read `~/.agents/awareness/current.md` directly.
+
+Instruction-file imports such as `@/path/to/current.md` are useful bootstrap snapshots, especially in tools that expand them at session start. They are not a live synchronization mechanism.
 
 The agent identifies:
 
@@ -16,6 +27,8 @@ The agent identifies:
 - expected next action
 
 If the user's request does not match the current focus, the agent records a task switch.
+
+When working in a parallel-agent environment, run `awareness refresh` or reread `current.md` before assuming the snapshot is still current.
 
 ## 2. Task Start
 
@@ -70,7 +83,13 @@ Valid states:
 
 ## 5. Handoff
 
-Before returning control to the user, the agent verifies that another session could continue from the private files.
+Before returning control to the user, the agent refreshes from disk and verifies that another session could continue from the private files.
+
+If the CLI is available, use:
+
+```bash
+awareness handoff
+```
 
 The awareness board must include:
 

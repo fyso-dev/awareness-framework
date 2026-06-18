@@ -34,7 +34,13 @@ It should answer:
 - What evidence exists?
 - What should appear in the end-of-day report?
 
-### 2. History Is Append-Only
+### 2. Bootstrap Is Not Synchronization
+
+Instruction-file imports can preload the awareness board at session start. That is a snapshot, not a live subscription to file changes.
+
+In parallel-agent workflows, agents should refresh from disk before acting on potentially stale state. If the CLI is available, use `awareness refresh`, `awareness check`, or `awareness handoff`. If not, reread `~/.agents/awareness/current.md`.
+
+### 3. History Is Append-Only
 
 The daily worklog is chronological and append-only. Corrections are new entries.
 
@@ -47,7 +53,7 @@ It should capture:
 - verification
 - commits, PRs, deployments, and external evidence
 
-### 3. Evidence Beats Narration
+### 4. Evidence Beats Narration
 
 Prefer concrete evidence over long prose:
 
@@ -59,17 +65,17 @@ Prefer concrete evidence over long prose:
 - issue IDs
 - blocker owners
 
-### 4. External IDs Are Preserved, Not Invented
+### 5. External IDs Are Preserved, Not Invented
 
 When a Jira issue, GitHub issue, PR, or ticket exists, record it. If none exists, use `Unassigned` and reconcile later.
 
 Agents must not invent external IDs.
 
-### 5. Private State Is Not Versioned
+### 6. Private State Is Not Versioned
 
 This repository stores templates and rules only. Real files such as `~/.agents/awareness/current.md` and `~/.agents/worklog/YYYY-MM-DD.md` stay private.
 
-### 6. Self-Improvement Is Reviewed
+### 7. Self-Improvement Is Reviewed
 
 Agents can detect process friction and suggest improvements, but framework changes happen through pull requests or another reviewed change process.
 

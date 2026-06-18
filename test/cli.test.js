@@ -74,6 +74,25 @@ test('log appends a concrete entry', () => {
   assert.match(worklog, /- Evidence: test\/cli.test.js/);
 });
 
+test('refresh aliases status and reloads current focus', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'focus',
+    '--task', 'PROJECT-123',
+    '--summary', 'Build awareness CLI',
+    '--repo', 'fyso-dev/awareness-framework',
+    '--branch', 'codex/cli-and-personality',
+    '--next', 'Run tests',
+  ], home);
+
+  const result = run(['refresh'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Current Focus/);
+  assert.match(result.stdout, /PROJECT-123/);
+});
+
 test('personality note and adopt update private profile', () => {
   const home = tempHome();
   run(['init'], home);
