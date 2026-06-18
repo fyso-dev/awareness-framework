@@ -22,7 +22,7 @@
     "automation"
   ],
   "bin": {
-    "awareness": "./bin/awareness.js"
+    "awareness": "bin/awareness.js"
   },
   "files": [
     "bin",
