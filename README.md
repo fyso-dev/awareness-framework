@@ -58,6 +58,7 @@ This repository contains the framework, templates, and governance rules. It must
 
 ## Documentation
 
+- [Install](docs/install.md)
 - [Framework](docs/framework.md)
 - [Lifecycle](docs/lifecycle.md)
 - [Private State](docs/private-state.md)
@@ -83,6 +84,7 @@ This repository contains the framework, templates, and governance rules. It must
 ```bash
 npm install -g git+https://github.com/fyso-dev/awareness-framework.git
 awareness init
+awareness init --wrappers
 awareness status
 awareness refresh
 awareness check

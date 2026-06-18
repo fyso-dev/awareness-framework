@@ -10,6 +10,8 @@ Instead of asking every agent to remember the full protocol, use commands that c
 npm install -g git+https://github.com/fyso-dev/awareness-framework.git
 ```
 
+See [Install](install.md) for first-run setup, wrapper initialization, updates, and custom paths.
+
 For local development:
 
 ```bash
@@ -70,6 +72,27 @@ Creates:
 - `memory/preferences.md`
 - `memory/patterns.md`
 - `evaluations/`
+
+Create regular wrapper files for Codex, Claude Code, OpenCode, and Pi:
+
+```bash
+awareness init --wrappers
+```
+
+Existing wrappers are preserved. To replace them intentionally:
+
+```bash
+awareness init --wrappers --overwrite-wrappers
+```
+
+Use custom roots for tests or non-standard machines:
+
+```bash
+awareness init --wrappers \
+  --home /path/to/.agents \
+  --user-home /path/to/user-home \
+  --config-home /path/to/config-home
+```
 
 ### `status`
 

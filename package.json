@@ -1,7 +1,7 @@
 {
   "name": "@fyso/awareness-framework",
   "version": "0.1.0",
-  "description": "Methodology and helper CLI for agent awareness, daily worklogs, handoffs, and evaluation loops.",
+  "description": "Methodology and helper CLI for agent awareness, initialization, daily worklogs, handoffs, and evaluation loops.",
   "type": "module",
   "bin": {
     "awareness": "./bin/awareness.js"
