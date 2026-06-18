@@ -93,6 +93,7 @@ function printHelp(ctx) {
 
 Usage:
   awareness init [--home PATH]
+  awareness init --wrappers [--home PATH] [--user-home PATH] [--config-home PATH] [--overwrite-wrappers]
   awareness status [--home PATH]
   awareness refresh [--home PATH]
   awareness check [--home PATH] [--strict]
@@ -109,9 +110,12 @@ The CLI maintains private files under ~/.agents by default. It does not post to 
 
 function initCommand(ctx, opts) {
   const home = agentsHome(ctx, opts);
+  const userHome = userHomePath(ctx, opts);
+  const configHome = configHomePath(ctx, opts, userHome);
   const today = todayParts(ctx);
   const created = [];
   const existing = [];
+  const overwritten = [];
 
   for (const dir of ['awareness', 'worklog', 'memory', 'evaluations']) {
     ensureDir(path.join(home, dir));
@@ -124,9 +128,25 @@ function initCommand(ctx, opts) {
   writeIfMissing(path.join(home, 'memory', 'preferences.md'), privateMemorySeed('Preferences'), created, existing);
   writeIfMissing(path.join(home, 'memory', 'patterns.md'), privateMemorySeed('Patterns'), created, existing);
 
+  if (opts.wrappers) {
+    writeWrappers({
+      canonicalPath: path.join(home, 'AGENTS.md'),
+      userHome,
+      configHome,
+      overwrite: Boolean(opts.overwriteWrappers),
+      created,
+      existing,
+      overwritten,
+    });
+  }
+
   out(ctx, `Initialized awareness home: ${home}`);
-  out(ctx, `Created: ${created.length ? created.map((file) => path.relative(home, file)).join(', ') : 'none'}`);
-  out(ctx, `Existing: ${existing.length ? existing.map((file) => path.relative(home, file)).join(', ') : 'none'}`);
+  out(ctx, `Created: ${created.length ? created.map((file) => displayPath(home, file)).join(', ') : 'none'}`);
+  out(ctx, `Existing: ${existing.length ? existing.map((file) => displayPath(home, file)).join(', ') : 'none'}`);
+  if (opts.wrappers) {
+    out(ctx, `Wrappers: ${wrapperSummary({ userHome, configHome })}`);
+    out(ctx, `Overwritten: ${overwritten.length ? overwritten.join(', ') : 'none'}`);
+  }
   return 0;
 }
 
@@ -377,13 +397,10 @@ function collectWarnings(home, today) {
 
   if (fs.existsSync(worklogPath)) {
     const worklog = fs.readFileSync(worklogPath, 'utf8');
-    const entries = [...worklog.matchAll(/^### \d{2}:\d{2} - (.+?) - .+$/gm)];
+    const entries = parseWorklogEntries(worklog);
     if (!entries.length) warnings.push('Daily worklog has no entries.');
-    if (entries.some((entry) => entry[1] === 'Unassigned')) warnings.push('Daily worklog has Unassigned entries to reconcile.');
-    const entryBlocks = worklog
-      .split(/\n(?=### \d{2}:\d{2} - )/)
-      .filter((block) => block.trim().startsWith('### '));
-    if (entryBlocks.some((block) => !/\n- Evidence:\s+\S+/.test(block))) warnings.push('Some worklog entries may be missing Evidence.');
+    if (entries.some((entry) => entry.task === 'Unassigned')) warnings.push('Daily worklog has Unassigned entries to reconcile.');
+    if (entries.some((entry) => !entry.hasEvidence)) warnings.push('Some worklog entries may be missing Evidence.');
   }
 
   return warnings;
@@ -395,12 +412,12 @@ function buildEvaluation(home, today) {
   const current = fs.existsSync(currentPath) ? fs.readFileSync(currentPath, 'utf8') : '';
   const worklog = fs.existsSync(worklogPath) ? fs.readFileSync(worklogPath, 'utf8') : '';
   const warnings = collectWarnings(home, today);
-  const entries = [...worklog.matchAll(/^### \d{2}:\d{2} - (.+?) - .+$/gm)];
-  const assignedEntries = entries.filter((entry) => entry[1] !== 'Unassigned').length;
+  const entries = parseWorklogEntries(worklog);
+  const assignedEntries = entries.filter((entry) => entry.task && entry.task !== 'Unassigned').length;
   const freshness = current.includes(today.date) ? 2 : current ? 1 : 0;
   const traceability = !entries.length ? 0 : assignedEntries / entries.length >= 0.8 ? 2 : 1;
   const handoff = /- Next:\s+(?!The next concrete action)\S+/.test(extractSection(current, 'Current Focus')) ? 2 : current ? 1 : 0;
-  const noise = current.split('\n').length <= 180 && !/PROJECT-123|YYYY-MM-DD/.test(current) ? 2 : 1;
+  const noise = current.split('\n').length <= 180 && !/YYYY-MM-DD|branch-name/.test(current) ? 2 : 1;
   const reporting = extractSection(current, 'End-of-Day Candidates').trim() ? 2 : entries.length ? 1 : 0;
 
   return `# Awareness Evaluation - ${today.date}
@@ -444,6 +461,29 @@ function appendWorklog(home, today, entry) {
 ${nextLine}`;
 
   fs.appendFileSync(worklogPath, markdown);
+}
+
+function parseWorklogEntries(worklog) {
+  const headingRegex = /^#{2,3} \d{2}:\d{2} - .+$/gm;
+  const headings = [...worklog.matchAll(headingRegex)];
+  return headings.map((heading, index) => {
+    const start = heading.index;
+    const end = index + 1 < headings.length ? headings[index + 1].index : worklog.length;
+    const block = worklog.slice(start, end);
+    const headingText = heading[0];
+    const headingParts = headingText.replace(/^#{2,3} \d{2}:\d{2} - /, '').split(' - ');
+    const headingTask = headingParts.length > 1 && isTaskId(headingParts[0]) ? headingParts[0] : null;
+    const jiraTask = block.match(/^- Jira:\s+(.+)$/m)?.[1]?.trim();
+    return {
+      block,
+      task: headingTask || jiraTask || null,
+      hasEvidence: /- Evidence:\s+\S/.test(block) || /- Evidence:\s*\n\s+-\s+\S/.test(block),
+    };
+  });
+}
+
+function isTaskId(value) {
+  return value === 'Unassigned' || /^[A-Z][A-Z0-9]+-\d+$/.test(value);
 }
 
 function upsertActiveTask(content, task, home) {
@@ -542,6 +582,74 @@ function writeIfMissing(file, content, created, existing) {
   created.push(file);
 }
 
+function writeWrappers({ canonicalPath, userHome, configHome, overwrite, created, existing, overwritten }) {
+  const wrappers = [
+    {
+      file: path.join(userHome, '.codex', 'AGENTS.md'),
+      tool: 'Codex',
+    },
+    {
+      file: path.join(userHome, '.claude', 'CLAUDE.md'),
+      tool: 'Claude Code',
+    },
+    {
+      file: path.join(configHome, 'opencode', 'AGENTS.md'),
+      tool: 'OpenCode',
+    },
+    {
+      file: path.join(userHome, '.pi', 'agent', 'AGENTS.md'),
+      tool: 'Pi',
+    },
+  ];
+
+  for (const wrapper of wrappers) {
+    writeWrapper(wrapper.file, wrapperContent(wrapper.tool, canonicalPath), overwrite, created, existing, overwritten);
+  }
+}
+
+function writeWrapper(file, content, overwrite, created, existing, overwritten) {
+  ensureDir(path.dirname(file));
+  if (fs.existsSync(file)) {
+    if (!overwrite) {
+      existing.push(file);
+      return;
+    }
+    fs.writeFileSync(file, content);
+    overwritten.push(file);
+    return;
+  }
+
+  fs.writeFileSync(file, content);
+  created.push(file);
+}
+
+function wrapperContent(tool, canonicalPath) {
+  return `# ${tool} Agent Instructions
+
+Read and follow the canonical private protocol at:
+
+@${canonicalPath}
+
+If this CLI does not expand @ imports automatically, open that file explicitly before starting work.
+
+At session start, prefer \`awareness status\` or \`awareness check\` when the Awareness CLI is available. Use \`awareness refresh\` when parallel work may have changed state, and \`awareness handoff\` before returning control.
+`;
+}
+
+function wrapperSummary({ userHome, configHome }) {
+  return [
+    path.join(userHome, '.codex', 'AGENTS.md'),
+    path.join(userHome, '.claude', 'CLAUDE.md'),
+    path.join(configHome, 'opencode', 'AGENTS.md'),
+    path.join(userHome, '.pi', 'agent', 'AGENTS.md'),
+  ].join(', ');
+}
+
+function displayPath(base, file) {
+  const relative = path.relative(base, file);
+  return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : file;
+}
+
 function dailyWorklog(date) {
   return `# Daily Worklog - ${date}
 
@@ -615,6 +723,16 @@ function required(opts, key) {
 
 function agentsHome(ctx, opts) {
   const raw = opts.home || ctx.env.AGENTS_HOME || path.join(os.homedir(), '.agents');
+  return path.resolve(expandHome(raw));
+}
+
+function userHomePath(ctx, opts) {
+  const raw = opts.userHome || ctx.env.AWARENESS_USER_HOME || os.homedir();
+  return path.resolve(expandHome(raw));
+}
+
+function configHomePath(ctx, opts, userHome) {
+  const raw = opts.configHome || ctx.env.XDG_CONFIG_HOME || path.join(userHome, '.config');
   return path.resolve(expandHome(raw));
 }
 

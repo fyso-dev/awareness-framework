@@ -34,6 +34,28 @@ test('init creates private awareness files', () => {
   assert.equal(fs.existsSync(path.join(home, 'memory', 'personality.md')), true);
 });
 
+test('init can create regular wrapper files without overwriting existing files', () => {
+  const home = tempHome();
+  const userHome = tempHome();
+  const configHome = tempHome();
+  const codexWrapper = path.join(userHome, '.codex', 'AGENTS.md');
+  fs.mkdirSync(path.dirname(codexWrapper), { recursive: true });
+  fs.writeFileSync(codexWrapper, 'custom codex wrapper');
+
+  const result = run(['init', '--wrappers', '--user-home', userHome, '--config-home', configHome], home);
+
+  assert.equal(result.code, 0);
+  assert.equal(fs.readFileSync(codexWrapper, 'utf8'), 'custom codex wrapper');
+  assert.equal(fs.existsSync(path.join(userHome, '.claude', 'CLAUDE.md')), true);
+  assert.equal(fs.existsSync(path.join(configHome, 'opencode', 'AGENTS.md')), true);
+  assert.equal(fs.existsSync(path.join(userHome, '.pi', 'agent', 'AGENTS.md')), true);
+
+  const overwrite = run(['init', '--wrappers', '--overwrite-wrappers', '--user-home', userHome, '--config-home', configHome], home);
+
+  assert.equal(overwrite.code, 0);
+  assert.match(fs.readFileSync(codexWrapper, 'utf8'), /@.+AGENTS\.md/);
+});
+
 test('focus updates awareness and appends worklog', () => {
   const home = tempHome();
   run(['init'], home);
@@ -91,6 +113,31 @@ test('refresh aliases status and reloads current focus', () => {
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Current Focus/);
   assert.match(result.stdout, /PROJECT-123/);
+});
+
+test('check recognizes legacy worklog entries with Jira metadata', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const worklog = path.join(home, 'worklog', '2099-01-02.md');
+  fs.writeFileSync(worklog, `# Daily Worklog - 2099-01-02
+
+## 12:34 - Legacy entry
+
+- Jira: PROJECT-123
+- Repo: fyso-dev/awareness-framework
+- Branch: main
+- Status: done
+- Worked on:
+  - Kept a legacy entry format.
+- Evidence:
+  - test/cli.test.js
+- Next:
+`);
+
+  const result = run(['check'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /OK: awareness state is maintainable/);
 });
 
 test('personality note and adopt update private profile', () => {

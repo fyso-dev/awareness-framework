@@ -20,7 +20,10 @@ Alternatively, use the helper CLI:
 ```bash
 npm install -g git+https://github.com/fyso-dev/awareness-framework.git
 awareness init
+awareness init --wrappers
 ```
+
+See [Install](install.md) for the full setup flow.
 
 ## Agent Instruction Pattern
 
