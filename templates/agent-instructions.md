@@ -8,6 +8,7 @@ You operate in a multi-task, multi-agent environment. Before doing work, load th
 - Daily worklog: `~/.agents/worklog/YYYY-MM-DD.md`
 - Optional durable memory: `~/.agents/memory/`
 - Optional evaluation notes: `~/.agents/evaluations/YYYY-MM-DD.md`
+- Runtime hook and scheduler events: `~/.agents/runtime/`
 
 ## Lifecycle
 
@@ -19,6 +20,7 @@ You operate in a multi-task, multi-agent environment. Before doing work, load th
 6. When state changes, update the awareness board.
 7. Before handoff, run `awareness handoff` if available; otherwise make the awareness board reflect the exact current state and append a final worklog entry.
 8. At end of day, prepare a task-grouped summary for human review.
+9. Treat hook and scheduler runtime events as diagnostics only; they do not replace task worklog entries.
 
 ## Rules
 
@@ -26,6 +28,7 @@ You operate in a multi-task, multi-agent environment. Before doing work, load th
 - Do not invent task IDs.
 - Record evidence: paths, commands, test results, commits, PRs, deployments, blockers.
 - Prefer CLI maintenance commands (`awareness focus`, `awareness log`, `awareness handoff`, `awareness evaluate`) when available.
+- Use `awareness hook run` and `awareness schedule run` only for low-noise maintenance; do not let them post externally or promote long-term memory silently.
 - Keep private state out of version control.
 - Ask before posting worklogs, comments, status changes, or summaries to external systems.
 - Propose framework improvements through reviewed changes, not hidden local edits.

@@ -166,3 +166,80 @@ test('evaluate can print without writing', () => {
   assert.match(result.stdout, /# Awareness Evaluation - 2099-01-02/);
   assert.equal(fs.existsSync(path.join(home, 'evaluations', '2099-01-02.md')), false);
 });
+
+test('hook run records a low-noise runtime event', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['hook', 'run', '--tool', 'codex', '--event', 'session-start'], home);
+
+  assert.equal(result.code, 0);
+  const hookLog = path.join(home, 'runtime', 'hooks', '2099-01-02.jsonl');
+  assert.equal(fs.existsSync(hookLog), true);
+  const [entry] = fs.readFileSync(hookLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(entry.source, 'hook');
+  assert.equal(entry.tool, 'codex');
+  assert.equal(entry.event, 'session-start');
+});
+
+test('hook install writes Codex, Claude, and OpenCode integration files', () => {
+  const home = tempHome();
+  const userHome = tempHome();
+  const configHome = tempHome();
+  run(['init'], home);
+
+  const result = run([
+    'hook',
+    'install',
+    '--tool', 'all',
+    '--user-home', userHome,
+    '--config-home', configHome,
+    '--command', '/usr/local/bin/awareness',
+  ], home);
+
+  assert.equal(result.code, 0);
+
+  const codexHooks = JSON.parse(fs.readFileSync(path.join(userHome, '.codex', 'hooks.json'), 'utf8'));
+  assert.equal(codexHooks.hooks.SessionStart[0].hooks[0].type, 'command');
+  assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /--tool codex/);
+
+  const claudeSettings = JSON.parse(fs.readFileSync(path.join(userHome, '.claude', 'settings.json'), 'utf8'));
+  assert.match(claudeSettings.hooks.SessionEnd[0].hooks[0].command, /--tool claude/);
+
+  const plugin = fs.readFileSync(path.join(configHome, 'opencode', 'plugins', 'awareness-framework.js'), 'utf8');
+  assert.match(plugin, /Awareness Framework generated plugin/);
+  assert.match(plugin, /session\.created/);
+});
+
+test('schedule run daily writes runtime event and daily evaluation', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['schedule', 'run', '--cadence', 'daily'], home);
+
+  assert.equal(result.code, 0);
+  assert.equal(fs.existsSync(path.join(home, 'runtime', 'schedule', '2099-01-02.jsonl')), true);
+  assert.equal(fs.existsSync(path.join(home, 'evaluations', '2099-01-02.md')), true);
+});
+
+test('schedule install writes macOS LaunchAgents for hourly and daily maintenance', () => {
+  const home = tempHome();
+  const userHome = tempHome();
+  run(['init'], home);
+
+  const result = run([
+    'schedule',
+    'install',
+    '--cadence', 'all',
+    '--user-home', userHome,
+    '--command', '/usr/local/bin/awareness',
+  ], home);
+
+  assert.equal(result.code, 0);
+  const hourly = fs.readFileSync(path.join(userHome, 'Library', 'LaunchAgents', 'dev.fyso.awareness.hourly.plist'), 'utf8');
+  const daily = fs.readFileSync(path.join(userHome, 'Library', 'LaunchAgents', 'dev.fyso.awareness.daily.plist'), 'utf8');
+  assert.match(hourly, /<integer>3600<\/integer>/);
+  assert.match(daily, /<integer>86400<\/integer>/);
+  assert.match(hourly, /--cadence/);
+  assert.match(hourly, /hourly/);
+});
