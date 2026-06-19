@@ -22,6 +22,9 @@
 
 - Short-term observations to keep short-term:
 - Long-term memory candidates:
+- Repeated candidates from `awareness memory review`:
+- Suggested pattern promotions:
+- Promotion command and evidence:
 - Memory to prune or revise:
 - User confirmation needed:
 
@@ -29,7 +32,7 @@
 
 - Awareness cleanup:
 - Worklog correction:
-- Long-term memory promotion:
+- Long-term memory promotion, candidate, or prune decision:
 - Personality update:
 - Framework PR candidate:
 
