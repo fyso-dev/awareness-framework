@@ -266,6 +266,37 @@ test('memory note and promote update long-term memory', () => {
   assert.match(memory, /Surface memory candidates proactively/);
 });
 
+test('memory note and promote append auditable memory events', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  run([
+    'memory',
+    'note',
+    '--text', 'User wants local recall',
+    '--evidence', 'Planning discussion',
+  ], home);
+  run([
+    'memory',
+    'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer local-first memory operations',
+    '--evidence', 'User approved local event log design',
+  ], home);
+
+  const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+
+  assert.equal(events[0].type, 'memory.candidate.created');
+  assert.equal(events[0].text, 'User wants local recall');
+  assert.equal(events[0].source, 'memory.note');
+  assert.equal(events[1].type, 'memory.promoted');
+  assert.equal(events[1].kind, 'preference');
+  assert.equal(events[1].text, 'Prefer local-first memory operations');
+});
+
 test('memory review suggests repeated candidates as patterns', () => {
   const home = tempHome();
   run(['init'], home);

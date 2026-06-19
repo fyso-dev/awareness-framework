@@ -430,6 +430,13 @@ function memoryPromoteCommand(ctx, home, opts) {
   content = replaceMetadata(content, 'Updated', formatTimestamp(today));
   content = appendToSection(content, section, `- ${today.date}: ${text} (evidence: ${evidence})\n`);
   fs.writeFileSync(file, content);
+  appendMemoryEvent(home, today, {
+    type: 'memory.promoted',
+    kind,
+    section,
+    text,
+    evidence,
+  });
   out(ctx, `Memory promoted to ${section}: ${text}`);
   return 0;
 }
@@ -1013,7 +1020,7 @@ ${warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- No
 
 function recordEvaluationMemoryCandidates(home, today) {
   const candidates = buildEvaluationMemoryCandidates(home, today);
-  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence));
+  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence, 'evaluation'));
 }
 
 function buildEvaluationMemoryCandidates(home, today) {
@@ -1060,7 +1067,7 @@ function buildEvaluationMemoryCandidates(home, today) {
   return candidates;
 }
 
-function appendMemoryCandidate(home, today, text, evidence) {
+function appendMemoryCandidate(home, today, text, evidence, source = 'memory.note') {
   const file = longTermMemoryPath(home);
   let content = fs.readFileSync(file, 'utf8');
   if (memoryCandidateExists(content, text, evidence)) return false;
@@ -1068,6 +1075,12 @@ function appendMemoryCandidate(home, today, text, evidence) {
   content = replaceMetadata(content, 'Updated', formatTimestamp(today));
   content = appendToSection(content, 'Promotion Candidates', `- ${today.date}: ${text} (evidence: ${evidence})\n`);
   fs.writeFileSync(file, content);
+  appendMemoryEvent(home, today, {
+    type: 'memory.candidate.created',
+    source,
+    text,
+    evidence,
+  });
   return true;
 }
 
@@ -1532,6 +1545,30 @@ function personalityPath(home) {
 
 function longTermMemoryPath(home) {
   return path.join(home, 'memory', 'long-term.md');
+}
+
+function memoryEventPath(home) {
+  return path.join(home, 'memory', 'events.jsonl');
+}
+
+function appendMemoryEvent(home, today, event) {
+  const file = memoryEventPath(home);
+  ensureDir(path.dirname(file));
+  fs.appendFileSync(file, `${JSON.stringify({
+    timestamp: formatTimestamp(today),
+    ...event,
+  })}\n`);
+  return file;
+}
+
+function readMemoryEvents(home) {
+  const file = memoryEventPath(home);
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 function userMemoryPath(home, userSlug) {
