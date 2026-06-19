@@ -413,6 +413,20 @@ test('improve writes evaluation and surfaces repeated pattern suggestions', () =
   assert.equal(events.at(-1).type, 'pattern.suggested');
 });
 
+test('improve rejects invalid min-count without writing evaluation or events', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const evaluationPath = path.join(home, 'evaluations', '2099-01-02.md');
+  const eventsPath = path.join(home, 'memory', 'events.jsonl');
+
+  const result = run(['improve', '--min-count', '1'], home);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Invalid --min-count/);
+  assert.equal(fs.existsSync(evaluationPath), false);
+  assert.equal(fs.existsSync(eventsPath), false);
+});
+
 test('recall dedupes repeated query terms when scoring', () => {
   const home = tempHome();
   run(['init'], home);

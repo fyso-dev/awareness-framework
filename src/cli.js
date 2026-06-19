@@ -518,6 +518,11 @@ function improveCommand(ctx, opts) {
   const today = todayParts(ctx);
   const evaluationPath = path.join(home, 'evaluations', `${today.date}.md`);
   const force = Boolean(opts.force);
+  const minCount = Number.parseInt(opts.minCount || '2', 10);
+
+  if (!Number.isInteger(minCount) || minCount < 2) {
+    throw new Error('Invalid --min-count. Use an integer >= 2.');
+  }
 
   let evaluation;
   if (force && fs.existsSync(evaluationPath)) {
@@ -533,11 +538,6 @@ function improveCommand(ctx, opts) {
     file: evaluation.file,
     status: evaluation.status,
   });
-
-  const minCount = Number.parseInt(opts.minCount || '2', 10);
-  if (!Number.isInteger(minCount) || minCount < 2) {
-    throw new Error('Invalid --min-count. Use an integer >= 2.');
-  }
 
   const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
   const suggestions = repeatedMemoryCandidateSuggestions(content, minCount);
