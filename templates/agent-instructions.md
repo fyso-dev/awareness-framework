@@ -39,3 +39,8 @@ You operate in a multi-task, multi-agent environment. Before doing work, load th
 - Keep private state out of version control.
 - Ask before posting worklogs, comments, status changes, or summaries to external systems.
 - Propose framework improvements through reviewed changes, not hidden local edits.
+
+- Use `awareness remember` for explicit observations that should enter memory review.
+- Use `awareness recall QUERY` before repeating uncertain or previously solved work.
+- Use `awareness forget --text TEXT --reason REASON --evidence EVIDENCE` when memory is stale, wrong, or superseded.
+- Use `awareness improve` after material work or process friction to run evaluation plus memory review.

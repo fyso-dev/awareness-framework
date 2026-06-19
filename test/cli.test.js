@@ -24,6 +24,10 @@ function tempHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'awareness-cli-'));
 }
 
+function repoRootForTests() {
+  return path.resolve(new URL('..', import.meta.url).pathname);
+}
+
 test('init creates private awareness files', () => {
   const home = tempHome();
   const result = run(['init'], home);
@@ -486,6 +490,19 @@ test('help lists local memory operation commands', () => {
   assert.match(stdout, /awareness recall QUERY/);
   assert.match(stdout, /awareness forget --text TEXT --reason TEXT --evidence TEXT/);
   assert.match(stdout, /awareness improve/);
+});
+
+test('documentation mentions local memory operations', () => {
+  const cliDocs = fs.readFileSync(path.join(repoRootForTests(), 'docs', 'cli.md'), 'utf8');
+  const memoryDocs = fs.readFileSync(path.join(repoRootForTests(), 'docs', 'memory.md'), 'utf8');
+  const agentTemplate = fs.readFileSync(path.join(repoRootForTests(), 'templates', 'agent-instructions.md'), 'utf8');
+
+  assert.match(cliDocs, /awareness remember/);
+  assert.match(cliDocs, /awareness recall/);
+  assert.match(cliDocs, /awareness forget/);
+  assert.match(cliDocs, /awareness improve/);
+  assert.match(memoryDocs, /memory\/events\.jsonl/);
+  assert.match(agentTemplate, /awareness recall/);
 });
 
 test('hook run records a low-noise runtime event', () => {

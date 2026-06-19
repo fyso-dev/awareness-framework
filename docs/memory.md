@@ -14,6 +14,23 @@ Awareness Framework separates memory by time horizon and trust level. The goal i
 
 Do not load every layer into every prompt. Load the smallest layer that answers the current need.
 
+## Local Operation Model
+
+Awareness uses a small local operation vocabulary:
+
+- `remember`: capture an evidence-backed candidate.
+- `recall`: search local memory, events, worklogs, and evaluations.
+- `forget`: prune or revise stale memory without destructive deletion.
+- `improve`: run evaluation plus memory review to surface repeated candidates.
+
+The append-only event log lives at:
+
+```text
+~/.agents/memory/events.jsonl
+```
+
+Markdown files remain the readable projection. The event log is the auditable history of memory operations.
+
 ## Short-Term Memory
 
 Short-term memory is operational. It is optimized for the next action.
