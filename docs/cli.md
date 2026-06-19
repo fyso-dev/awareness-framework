@@ -186,7 +186,23 @@ awareness evaluate --print
 awareness evaluate --force
 ```
 
-The CLI does not automatically change the framework. Repeated findings should become reviewed framework changes.
+When an evaluation is written, the CLI also records low-risk promotion candidates in `memory/long-term.md`. It does not silently promote candidates into durable rules; use `awareness memory promote` after review.
+
+### `memory`
+
+Reviews and promotes long-term memory.
+
+```bash
+awareness memory candidates
+awareness memory review
+awareness memory review --min-count 3
+awareness memory note --text "User prefers active memory review" --evidence "Direct request"
+awareness memory promote --kind preference --text "Surface memory candidates proactively" --evidence "User confirmed"
+```
+
+`memory review` scans promotion candidates and suggests repeated candidates as `pattern` promotions once they appear at least twice by default.
+
+Valid promotion kinds are `preference`, `pattern`, `project`, and `review`.
 
 ### `hook run`
 
