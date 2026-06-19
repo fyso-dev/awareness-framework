@@ -204,6 +204,22 @@ awareness memory promote --kind preference --text "Surface memory candidates pro
 
 Valid promotion kinds are `preference`, `pattern`, `project`, and `review`.
 
+### Local memory operations
+
+These commands provide a small Cognee-inspired operation vocabulary without adding a graph database or vector store.
+
+```bash
+awareness remember --text "Prefer recall before repeating implementation work" --evidence "User request"
+awareness recall "implementation work"
+awareness forget --text "Old assumption" --reason "Superseded by user correction" --evidence "Correction message"
+awareness improve
+```
+
+`remember` records a promotion candidate and appends `memory.candidate.created` to `memory/events.jsonl`.
+`recall` performs deterministic local text search across memory, memory events, worklogs, and evaluations.
+`forget` records a prune/revision entry and appends `memory.pruned`; it does not destructively delete historical evidence.
+`improve` runs the evaluation/review loop and appends `evaluation.created` and `pattern.suggested` events when applicable.
+
 ### `hook run`
 
 Records a lightweight lifecycle event from an agent CLI hook.

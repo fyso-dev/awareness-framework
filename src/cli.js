@@ -18,7 +18,7 @@ export function runCli(argv, options = {}) {
 
   try {
     const parsed = parseArgs(argv);
-    const [command, subcommand] = parsed.positionals;
+    const [command, subcommand, ...positionRest] = parsed.positionals;
 
     if (!command || command === 'help' || parsed.opts.help) {
       printHelp(ctx);
@@ -44,6 +44,14 @@ export function runCli(argv, options = {}) {
         return evaluateCommand(ctx, parsed.opts);
       case 'memory':
         return memoryCommand(ctx, subcommand, parsed.opts);
+      case 'remember':
+        return rememberCommand(ctx, parsed.opts);
+      case 'recall':
+        return recallCommand(ctx, [subcommand, ...positionRest].filter(Boolean).join(' '), parsed.opts);
+      case 'forget':
+        return forgetCommand(ctx, parsed.opts);
+      case 'improve':
+        return improveCommand(ctx, parsed.opts);
       case 'hook':
         return hookCommand(ctx, subcommand, parsed.opts);
       case 'schedule':
@@ -114,6 +122,10 @@ Usage:
   awareness memory review [--min-count N] [--home PATH]
   awareness memory note --text TEXT [--evidence TEXT] [--home PATH]
   awareness memory promote --kind preference|pattern|project|review --text TEXT --evidence TEXT [--home PATH]
+  awareness remember --text TEXT --evidence TEXT [--home PATH]
+  awareness recall QUERY [--limit N] [--home PATH]
+  awareness forget --text TEXT --reason TEXT --evidence TEXT [--home PATH]
+  awareness improve [--force] [--min-count N] [--home PATH]
   awareness hook run --event EVENT [--tool TOOL] [--quiet] [--home PATH]
   awareness hook install --tool codex|claude|opencode|all [--command CMD] [--home PATH] [--user-home PATH] [--config-home PATH] [--overwrite]
   awareness schedule run --cadence hourly|daily [--home PATH]
@@ -418,6 +430,13 @@ function memoryPromoteCommand(ctx, home, opts) {
   content = replaceMetadata(content, 'Updated', formatTimestamp(today));
   content = appendToSection(content, section, `- ${today.date}: ${text} (evidence: ${evidence})\n`);
   fs.writeFileSync(file, content);
+  appendMemoryEvent(home, today, {
+    type: 'memory.promoted',
+    kind,
+    section,
+    text,
+    evidence,
+  });
   out(ctx, `Memory promoted to ${section}: ${text}`);
   return 0;
 }
@@ -433,6 +452,114 @@ function memoryPromotionSection(kind) {
     throw new Error(`Invalid memory kind: ${kind}. Valid kinds: ${Object.keys(sections).join(', ')}`);
   }
   return sections[kind];
+}
+
+function rememberCommand(ctx, opts) {
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const text = required(opts, 'text');
+  const evidence = required(opts, 'evidence');
+  const today = todayParts(ctx);
+  const added = appendMemoryCandidate(home, today, text, evidence, 'remember');
+  out(ctx, added ? `Remembered candidate: ${text}` : `Memory candidate already exists: ${text}`);
+  return 0;
+}
+
+function recallCommand(ctx, query, opts) {
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const search = opts.query || query;
+  if (!search || search === true) {
+    throw new Error('Missing recall query. Use: awareness recall QUERY');
+  }
+  const limit = Number.parseInt(opts.limit || '10', 10);
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('Invalid --limit. Use an integer >= 1.');
+  }
+
+  const results = recallMatches(home, search, limit);
+  out(ctx, `Recall Results (${results.length})`);
+  if (!results.length) {
+    out(ctx, '- No matches.');
+    return 0;
+  }
+
+  for (const result of results) {
+    out(ctx, `- ${displayPath(home, result.file)}:${result.line}: ${result.text}`);
+  }
+  return 0;
+}
+
+function forgetCommand(ctx, opts) {
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const text = required(opts, 'text');
+  const reason = required(opts, 'reason');
+  const evidence = required(opts, 'evidence');
+  const today = todayParts(ctx);
+  const file = longTermMemoryPath(home);
+  let content = fs.readFileSync(file, 'utf8');
+  content = replaceMetadata(content, 'Updated', formatTimestamp(today));
+  content = appendToSection(content, 'Pruned Or Revised', `- ${today.date}: ${text} (reason: ${reason}; evidence: ${evidence})\n`);
+  fs.writeFileSync(file, content);
+  appendMemoryEvent(home, today, {
+    type: 'memory.pruned',
+    text,
+    reason,
+    evidence,
+  });
+  out(ctx, `Memory pruned or revised: ${text}`);
+  return 0;
+}
+
+function improveCommand(ctx, opts) {
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const today = todayParts(ctx);
+  const evaluationPath = path.join(home, 'evaluations', `${today.date}.md`);
+  const force = Boolean(opts.force);
+  const minCount = Number.parseInt(opts.minCount || '2', 10);
+
+  if (!Number.isInteger(minCount) || minCount < 2) {
+    throw new Error('Invalid --min-count. Use an integer >= 2.');
+  }
+
+  let evaluation;
+  if (force && fs.existsSync(evaluationPath)) {
+    fs.writeFileSync(evaluationPath, buildEvaluation(home, today));
+    const candidates = recordEvaluationMemoryCandidates(home, today);
+    evaluation = { file: evaluationPath, status: 'rewritten', candidates };
+  } else {
+    evaluation = writeEvaluationIfMissing(home, today);
+  }
+
+  if (evaluation.status === 'written' || evaluation.status === 'rewritten') {
+    appendMemoryEvent(home, today, {
+      type: 'evaluation.created',
+      file: evaluation.file,
+      status: evaluation.status,
+    });
+  }
+
+  const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
+  const suggestions = repeatedMemoryCandidateSuggestions(content, minCount);
+  for (const suggestion of suggestions) {
+    appendMemoryEvent(home, today, {
+      type: 'pattern.suggested',
+      text: suggestion.text,
+      count: suggestion.count,
+      evidence: suggestion.evidence,
+    });
+  }
+
+  out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
+  out(ctx, `Memory candidates: ${evaluation.candidates ? evaluation.candidates.length : 'not changed'}`);
+  out(ctx, `Pattern suggestions: ${suggestions.length}`);
+  for (const suggestion of suggestions) {
+    out(ctx, `- ${suggestion.text} (${suggestion.count} observations)`);
+    out(ctx, `  Promote: awareness memory promote --kind pattern --text "${shellQuoteText(suggestion.text)}" --evidence "${shellQuoteText(suggestion.evidence)}"`);
+  }
+  return 0;
 }
 
 function personalityCommand(ctx, subcommand, opts) {
@@ -985,7 +1112,7 @@ ${warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- No
 
 function recordEvaluationMemoryCandidates(home, today) {
   const candidates = buildEvaluationMemoryCandidates(home, today);
-  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence));
+  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence, 'evaluation'));
 }
 
 function buildEvaluationMemoryCandidates(home, today) {
@@ -1032,7 +1159,7 @@ function buildEvaluationMemoryCandidates(home, today) {
   return candidates;
 }
 
-function appendMemoryCandidate(home, today, text, evidence) {
+function appendMemoryCandidate(home, today, text, evidence, source = 'memory.note') {
   const file = longTermMemoryPath(home);
   let content = fs.readFileSync(file, 'utf8');
   if (memoryCandidateExists(content, text, evidence)) return false;
@@ -1040,6 +1167,12 @@ function appendMemoryCandidate(home, today, text, evidence) {
   content = replaceMetadata(content, 'Updated', formatTimestamp(today));
   content = appendToSection(content, 'Promotion Candidates', `- ${today.date}: ${text} (evidence: ${evidence})\n`);
   fs.writeFileSync(file, content);
+  appendMemoryEvent(home, today, {
+    type: 'memory.candidate.created',
+    source,
+    text,
+    evidence,
+  });
   return true;
 }
 
@@ -1050,8 +1183,10 @@ function memoryCandidateExists(content, text, evidence) {
 
 function repeatedMemoryCandidateSuggestions(content, minCount) {
   const grouped = new Map();
+  const prunedTexts = prunedMemoryCandidateTexts(content);
   for (const candidate of parseMemoryCandidates(content)) {
     const key = normalizeMemoryCandidateText(candidate.text);
+    if (prunedTexts.has(key)) continue;
     const group = grouped.get(key) || { text: candidate.text, count: 0, evidence: [] };
     group.count += 1;
     group.evidence.push(candidate.evidence);
@@ -1078,6 +1213,15 @@ function parseMemoryCandidates(content) {
       text: match[1],
       evidence: match[2],
     }));
+}
+
+function prunedMemoryCandidateTexts(content) {
+  return new Set(extractSection(content, 'Pruned Or Revised')
+    .split('\n')
+    .map((line) => line.trim())
+    .map((line) => line.match(/^- \d{4}-\d{2}-\d{2}: (.+) \(reason: .+; evidence: .+\)$/))
+    .filter(Boolean)
+    .map((match) => normalizeMemoryCandidateText(match[1])));
 }
 
 function normalizeMemoryCandidateText(text) {
@@ -1504,6 +1648,82 @@ function personalityPath(home) {
 
 function longTermMemoryPath(home) {
   return path.join(home, 'memory', 'long-term.md');
+}
+
+function memoryEventPath(home) {
+  return path.join(home, 'memory', 'events.jsonl');
+}
+
+function appendMemoryEvent(home, today, event) {
+  const file = memoryEventPath(home);
+  ensureDir(path.dirname(file));
+  fs.appendFileSync(file, `${JSON.stringify({
+    timestamp: formatTimestamp(today),
+    ...event,
+  })}\n`);
+  return file;
+}
+
+function readMemoryEvents(home) {
+  const file = memoryEventPath(home);
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+function collectRecallSources(home) {
+  return [
+    ...markdownFilesRecursive(path.join(home, 'memory')),
+    memoryEventPath(home),
+    ...markdownFiles(path.join(home, 'worklog')),
+    ...markdownFiles(path.join(home, 'evaluations')),
+  ].filter((file, index, files) => fs.existsSync(file) && files.indexOf(file) === index);
+}
+
+function markdownFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((name) => name.endsWith('.md'))
+    .sort()
+    .map((name) => path.join(dir, name));
+}
+
+function markdownFilesRecursive(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .flatMap((entry) => {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) return markdownFilesRecursive(file);
+      if (entry.isFile() && entry.name.endsWith('.md')) return [file];
+      return [];
+    });
+}
+
+function recallMatches(home, query, limit) {
+  const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))];
+  const results = [];
+  for (const file of collectRecallSources(home)) {
+    const content = fs.readFileSync(file, 'utf8');
+    const lines = content.split('\n');
+    lines.forEach((line, index) => {
+      const haystack = line.toLowerCase();
+      const score = terms.filter((term) => haystack.includes(term)).length;
+      if (score > 0) {
+        results.push({
+          file,
+          line: index + 1,
+          score,
+          text: line.trim(),
+        });
+      }
+    });
+  }
+  results.sort((left, right) => right.score - left.score || left.file.localeCompare(right.file) || left.line - right.line);
+  return results.slice(0, limit);
 }
 
 function userMemoryPath(home, userSlug) {

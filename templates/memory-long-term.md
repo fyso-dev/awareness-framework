@@ -32,6 +32,12 @@ This file stores durable, curated memory that improves future collaboration. Eva
 - Use `awareness memory promote --kind preference|pattern|project|review --text TEXT --evidence EVIDENCE` after review.
 - Repeated candidates may share the same text with distinct evidence; do not collapse them before review.
 
+## Event Log
+
+- Append-only audit history: `memory/events.jsonl`
+- Markdown sections are readable projections.
+- Do not hand-edit event history.
+
 ## Pruned Or Revised
 
 - None yet.

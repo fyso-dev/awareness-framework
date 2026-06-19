@@ -24,6 +24,10 @@ function tempHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'awareness-cli-'));
 }
 
+function repoRootForTests() {
+  return path.resolve(new URL('..', import.meta.url).pathname);
+}
+
 test('init creates private awareness files', () => {
   const home = tempHome();
   const result = run(['init'], home);
@@ -266,6 +270,215 @@ test('memory note and promote update long-term memory', () => {
   assert.match(memory, /Surface memory candidates proactively/);
 });
 
+test('memory note and promote append auditable memory events', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  run([
+    'memory',
+    'note',
+    '--text', 'User wants local recall',
+    '--evidence', 'Planning discussion',
+  ], home);
+  run([
+    'memory',
+    'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer local-first memory operations',
+    '--evidence', 'User approved local event log design',
+  ], home);
+
+  const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+
+  assert.equal(events[0].type, 'memory.candidate.created');
+  assert.equal(events[0].text, 'User wants local recall');
+  assert.equal(events[0].source, 'memory.note');
+  assert.equal(events[1].type, 'memory.promoted');
+  assert.equal(events[1].kind, 'preference');
+  assert.equal(events[1].text, 'Prefer local-first memory operations');
+});
+
+test('remember records a promotion candidate and event', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run([
+    'remember',
+    '--text', 'Prefer recall before repeating implementation work',
+    '--evidence', 'User asked for active memory operations',
+  ], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Remembered candidate/);
+
+  const memory = fs.readFileSync(path.join(home, 'memory', 'long-term.md'), 'utf8');
+  assert.match(memory, /Prefer recall before repeating implementation work/);
+
+  const [event] = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(event.type, 'memory.candidate.created');
+  assert.equal(event.source, 'remember');
+});
+
+test('recall searches memory, events, worklogs, and evaluations', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'Always run recall-source memory coverage',
+    '--evidence', 'recall-source plan',
+  ], home);
+  fs.writeFileSync(path.join(home, 'memory', 'personality.md'), '- recall-source personality coverage\n');
+  fs.writeFileSync(path.join(home, 'memory', 'preferences.md'), '- recall-source preferences coverage\n');
+  fs.writeFileSync(path.join(home, 'memory', 'patterns.md'), '- recall-source patterns coverage\n');
+  fs.writeFileSync(path.join(home, 'memory', 'users', 'alice.md'), '- recall-source user coverage\n');
+  run([
+    'log',
+    '--task', 'PROJECT-123',
+    '--summary', 'Validated recall-source behavior',
+    '--changes', 'Recall should search worklog recall-source text.',
+    '--evidence', 'recall-source worklog evidence',
+  ], home);
+  fs.writeFileSync(path.join(home, 'evaluations', '2099-01-02.md'), `# Awareness Evaluation - 2099-01-02
+
+## Warnings
+
+- recall-source evaluation coverage
+`);
+
+  const result = run(['recall', 'recall-source coverage', '--limit', '20'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Recall Results/);
+  assert.match(result.stdout, /memory\/long-term\.md/);
+  assert.match(result.stdout, /memory\/personality\.md/);
+  assert.match(result.stdout, /memory\/preferences\.md/);
+  assert.match(result.stdout, /memory\/patterns\.md/);
+  assert.match(result.stdout, /memory\/users\/alice\.md/);
+  assert.match(result.stdout, /memory\/events\.jsonl/);
+  assert.match(result.stdout, /worklog\/2099-01-02\.md/);
+  assert.match(result.stdout, /evaluations\/2099-01-02\.md/);
+});
+
+test('forget records a pruned memory without deleting history', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'Temporary memory to revise',
+    '--evidence', 'Initial observation',
+  ], home);
+
+  const result = run([
+    'forget',
+    '--text', 'Temporary memory to revise',
+    '--reason', 'Superseded by explicit user correction',
+    '--evidence', 'User correction',
+  ], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Memory pruned or revised/);
+
+  const memory = fs.readFileSync(path.join(home, 'memory', 'long-term.md'), 'utf8');
+  const candidates = memory.split('## Pruned Or Revised')[0];
+  assert.match(memory, /## Pruned Or Revised/);
+  assert.match(memory, /Temporary memory to revise/);
+  assert.match(memory, /Superseded by explicit user correction/);
+  assert.match(candidates, /Temporary memory to revise/);
+  assert.match(candidates, /Initial observation/);
+
+  const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(events.at(-1).type, 'memory.pruned');
+});
+
+test('improve writes evaluation and surfaces repeated pattern suggestions', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'Improve traceability before handoff',
+    '--evidence', 'worklog/2099-01-01.md',
+  ], home, { AWARENESS_NOW: '2099-01-01T12:34:00.000Z' });
+  run([
+    'remember',
+    '--text', 'Improve traceability before handoff',
+    '--evidence', 'worklog/2099-01-02.md',
+  ], home);
+
+  const result = run(['improve'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Evaluation:/);
+  assert.match(result.stdout, /Pattern suggestions: 1/);
+  assert.match(result.stdout, /Improve traceability before handoff/);
+  assert.equal(fs.existsSync(path.join(home, 'evaluations', '2099-01-02.md')), true);
+
+  const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(events.at(-1).type, 'pattern.suggested');
+});
+
+test('improve does not log evaluation created for existing evaluation', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const first = run(['improve'], home);
+  const second = run(['improve'], home);
+
+  assert.equal(first.code, 0);
+  assert.equal(second.code, 0);
+  assert.match(second.stdout, /Evaluation: already exists/);
+
+  const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(events.filter((event) => event.type === 'evaluation.created').length, 1);
+});
+
+test('improve rejects invalid min-count without writing evaluation or events', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const evaluationPath = path.join(home, 'evaluations', '2099-01-02.md');
+  const eventsPath = path.join(home, 'memory', 'events.jsonl');
+
+  const result = run(['improve', '--min-count', '1'], home);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Invalid --min-count/);
+  assert.equal(fs.existsSync(evaluationPath), false);
+  assert.equal(fs.existsSync(eventsPath), false);
+});
+
+test('recall dedupes repeated query terms when scoring', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'dedupe-anchor memory-only',
+    '--evidence', 'dedupe test',
+  ], home);
+  fs.writeFileSync(path.join(home, 'evaluations', '2099-01-02.md'), `# Awareness Evaluation - 2099-01-02
+
+- dedupe-eval
+`);
+
+  const result = run(['recall', 'memory-only memory-only dedupe-eval', '--limit', '1'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /evaluations\/2099-01-02\.md/);
+});
+
 test('memory review suggests repeated candidates as patterns', () => {
   const home = tempHome();
   run(['init'], home);
@@ -288,6 +501,67 @@ test('memory review suggests repeated candidates as patterns', () => {
   assert.equal(review.code, 0);
   assert.match(review.stdout, /Suggested pattern \(2 observations\): Improve task traceability/);
   assert.match(review.stdout, /awareness memory promote --kind pattern/);
+});
+
+test('memory review ignores pruned repeated candidates', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  run([
+    'memory',
+    'note',
+    '--text', 'Remove stale deployment shortcut',
+    '--evidence', 'worklog/2099-01-01.md',
+  ], home, { AWARENESS_NOW: '2099-01-01T12:34:00.000Z' });
+  run([
+    'memory',
+    'note',
+    '--text', 'Remove stale deployment shortcut',
+    '--evidence', 'worklog/2099-01-02.md',
+  ], home);
+  run([
+    'forget',
+    '--text', 'Remove stale deployment shortcut',
+    '--reason', 'Corrected by user',
+    '--evidence', 'PR review',
+  ], home);
+
+  const review = run(['memory', 'review'], home);
+
+  assert.equal(review.code, 0);
+  assert.match(review.stdout, /No repeated candidates/);
+  assert.doesNotMatch(review.stdout, /Remove stale deployment shortcut/);
+});
+
+test('help lists local memory operation commands', () => {
+  let stdout = '';
+  const code = runCli(['help'], {
+    env: {
+      ...process.env,
+      AWARENESS_NOW: '2099-01-02T12:34:00.000Z',
+    },
+    stdout: { write: (chunk) => { stdout += chunk; } },
+    stderr: { write: () => {} },
+  });
+
+  assert.equal(code, 0);
+  assert.match(stdout, /awareness remember --text TEXT --evidence TEXT/);
+  assert.match(stdout, /awareness recall QUERY/);
+  assert.match(stdout, /awareness forget --text TEXT --reason TEXT --evidence TEXT/);
+  assert.match(stdout, /awareness improve/);
+});
+
+test('documentation mentions local memory operations', () => {
+  const cliDocs = fs.readFileSync(path.join(repoRootForTests(), 'docs', 'cli.md'), 'utf8');
+  const memoryDocs = fs.readFileSync(path.join(repoRootForTests(), 'docs', 'memory.md'), 'utf8');
+  const agentTemplate = fs.readFileSync(path.join(repoRootForTests(), 'templates', 'agent-instructions.md'), 'utf8');
+
+  assert.match(cliDocs, /awareness remember/);
+  assert.match(cliDocs, /awareness recall/);
+  assert.match(cliDocs, /awareness forget/);
+  assert.match(cliDocs, /awareness improve/);
+  assert.match(memoryDocs, /memory\/events\.jsonl/);
+  assert.match(agentTemplate, /awareness recall/);
 });
 
 test('hook run records a low-noise runtime event', () => {
