@@ -513,7 +513,51 @@ function forgetCommand(ctx, opts) {
 }
 
 function improveCommand(ctx, opts) {
-  throw new Error('improve command is not implemented yet');
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const today = todayParts(ctx);
+  const evaluationPath = path.join(home, 'evaluations', `${today.date}.md`);
+  const force = Boolean(opts.force);
+
+  let evaluation;
+  if (force && fs.existsSync(evaluationPath)) {
+    fs.writeFileSync(evaluationPath, buildEvaluation(home, today));
+    const candidates = recordEvaluationMemoryCandidates(home, today);
+    evaluation = { file: evaluationPath, status: 'rewritten', candidates };
+  } else {
+    evaluation = writeEvaluationIfMissing(home, today);
+  }
+
+  appendMemoryEvent(home, today, {
+    type: 'evaluation.created',
+    file: evaluation.file,
+    status: evaluation.status,
+  });
+
+  const minCount = Number.parseInt(opts.minCount || '2', 10);
+  if (!Number.isInteger(minCount) || minCount < 2) {
+    throw new Error('Invalid --min-count. Use an integer >= 2.');
+  }
+
+  const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
+  const suggestions = repeatedMemoryCandidateSuggestions(content, minCount);
+  for (const suggestion of suggestions) {
+    appendMemoryEvent(home, today, {
+      type: 'pattern.suggested',
+      text: suggestion.text,
+      count: suggestion.count,
+      evidence: suggestion.evidence,
+    });
+  }
+
+  out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
+  out(ctx, `Memory candidates: ${evaluation.candidates ? evaluation.candidates.length : 'not changed'}`);
+  out(ctx, `Pattern suggestions: ${suggestions.length}`);
+  for (const suggestion of suggestions) {
+    out(ctx, `- ${suggestion.text} (${suggestion.count} observations)`);
+    out(ctx, `  Promote: awareness memory promote --kind pattern --text "${shellQuoteText(suggestion.text)}" --evidence "${shellQuoteText(suggestion.evidence)}"`);
+  }
+  return 0;
 }
 
 function personalityCommand(ctx, subcommand, opts) {

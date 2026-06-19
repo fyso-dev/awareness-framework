@@ -384,6 +384,35 @@ test('forget records a pruned memory without deleting history', () => {
   assert.equal(events.at(-1).type, 'memory.pruned');
 });
 
+test('improve writes evaluation and surfaces repeated pattern suggestions', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'Improve traceability before handoff',
+    '--evidence', 'worklog/2099-01-01.md',
+  ], home, { AWARENESS_NOW: '2099-01-01T12:34:00.000Z' });
+  run([
+    'remember',
+    '--text', 'Improve traceability before handoff',
+    '--evidence', 'worklog/2099-01-02.md',
+  ], home);
+
+  const result = run(['improve'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Evaluation:/);
+  assert.match(result.stdout, /Pattern suggestions: 1/);
+  assert.match(result.stdout, /Improve traceability before handoff/);
+  assert.equal(fs.existsSync(path.join(home, 'evaluations', '2099-01-02.md')), true);
+
+  const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(events.at(-1).type, 'pattern.suggested');
+});
+
 test('recall dedupes repeated query terms when scoring', () => {
   const home = tempHome();
   run(['init'], home);
