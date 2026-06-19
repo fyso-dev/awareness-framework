@@ -290,6 +290,24 @@ test('memory review suggests repeated candidates as patterns', () => {
   assert.match(review.stdout, /awareness memory promote --kind pattern/);
 });
 
+test('help lists local memory operation commands', () => {
+  let stdout = '';
+  const code = runCli(['help'], {
+    env: {
+      ...process.env,
+      AWARENESS_NOW: '2099-01-02T12:34:00.000Z',
+    },
+    stdout: { write: (chunk) => { stdout += chunk; } },
+    stderr: { write: () => {} },
+  });
+
+  assert.equal(code, 0);
+  assert.match(stdout, /awareness remember --text TEXT --evidence TEXT/);
+  assert.match(stdout, /awareness recall QUERY/);
+  assert.match(stdout, /awareness forget --text TEXT --reason TEXT --evidence TEXT/);
+  assert.match(stdout, /awareness improve/);
+});
+
 test('hook run records a low-noise runtime event', () => {
   const home = tempHome();
   run(['init'], home);

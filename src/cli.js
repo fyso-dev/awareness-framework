@@ -18,7 +18,7 @@ export function runCli(argv, options = {}) {
 
   try {
     const parsed = parseArgs(argv);
-    const [command, subcommand] = parsed.positionals;
+    const [command, subcommand, ...positionRest] = parsed.positionals;
 
     if (!command || command === 'help' || parsed.opts.help) {
       printHelp(ctx);
@@ -44,6 +44,14 @@ export function runCli(argv, options = {}) {
         return evaluateCommand(ctx, parsed.opts);
       case 'memory':
         return memoryCommand(ctx, subcommand, parsed.opts);
+      case 'remember':
+        return rememberCommand(ctx, parsed.opts);
+      case 'recall':
+        return recallCommand(ctx, [subcommand, ...positionRest].filter(Boolean).join(' '), parsed.opts);
+      case 'forget':
+        return forgetCommand(ctx, parsed.opts);
+      case 'improve':
+        return improveCommand(ctx, parsed.opts);
       case 'hook':
         return hookCommand(ctx, subcommand, parsed.opts);
       case 'schedule':
@@ -114,6 +122,10 @@ Usage:
   awareness memory review [--min-count N] [--home PATH]
   awareness memory note --text TEXT [--evidence TEXT] [--home PATH]
   awareness memory promote --kind preference|pattern|project|review --text TEXT --evidence TEXT [--home PATH]
+  awareness remember --text TEXT --evidence TEXT [--home PATH]
+  awareness recall QUERY [--limit N] [--home PATH]
+  awareness forget --text TEXT --reason TEXT --evidence TEXT [--home PATH]
+  awareness improve [--force] [--min-count N] [--home PATH]
   awareness hook run --event EVENT [--tool TOOL] [--quiet] [--home PATH]
   awareness hook install --tool codex|claude|opencode|all [--command CMD] [--home PATH] [--user-home PATH] [--config-home PATH] [--overwrite]
   awareness schedule run --cadence hourly|daily [--home PATH]
@@ -433,6 +445,22 @@ function memoryPromotionSection(kind) {
     throw new Error(`Invalid memory kind: ${kind}. Valid kinds: ${Object.keys(sections).join(', ')}`);
   }
   return sections[kind];
+}
+
+function rememberCommand(ctx, opts) {
+  throw new Error('remember command is not implemented yet');
+}
+
+function recallCommand(ctx, query, opts) {
+  throw new Error('recall command is not implemented yet');
+}
+
+function forgetCommand(ctx, opts) {
+  throw new Error('forget command is not implemented yet');
+}
+
+function improveCommand(ctx, opts) {
+  throw new Error('improve command is not implemented yet');
 }
 
 function personalityCommand(ctx, subcommand, opts) {
