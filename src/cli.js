@@ -1617,7 +1617,7 @@ function markdownFiles(dir) {
 }
 
 function recallMatches(home, query, limit) {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))];
   const results = [];
   for (const file of collectRecallSources(home)) {
     const content = fs.readFileSync(file, 'utf8');

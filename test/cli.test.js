@@ -326,23 +326,50 @@ test('recall searches memory, events, worklogs, and evaluations', () => {
   run(['init'], home);
   run([
     'remember',
-    '--text', 'Always run recall before implementing memory features',
-    '--evidence', 'Memory operations plan',
+    '--text', 'Always run recall-source memory coverage',
+    '--evidence', 'recall-source plan',
   ], home);
   run([
     'log',
     '--task', 'PROJECT-123',
-    '--summary', 'Validated recall behavior',
-    '--changes', 'Recall should search worklog text.',
-    '--evidence', 'test/cli.test.js',
+    '--summary', 'Validated recall-source behavior',
+    '--changes', 'Recall should search worklog recall-source text.',
+    '--evidence', 'recall-source worklog evidence',
   ], home);
+  fs.writeFileSync(path.join(home, 'evaluations', '2099-01-02.md'), `# Awareness Evaluation - 2099-01-02
 
-  const result = run(['recall', 'recall behavior'], home);
+## Warnings
+
+- recall-source evaluation coverage
+`);
+
+  const result = run(['recall', 'recall-source coverage'], home);
 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Recall Results/);
   assert.match(result.stdout, /memory\/long-term\.md/);
+  assert.match(result.stdout, /memory\/events\.jsonl/);
   assert.match(result.stdout, /worklog\/2099-01-02\.md/);
+  assert.match(result.stdout, /evaluations\/2099-01-02\.md/);
+});
+
+test('recall dedupes repeated query terms when scoring', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'dedupe-anchor memory-only',
+    '--evidence', 'dedupe test',
+  ], home);
+  fs.writeFileSync(path.join(home, 'evaluations', '2099-01-02.md'), `# Awareness Evaluation - 2099-01-02
+
+- dedupe-eval
+`);
+
+  const result = run(['recall', 'memory-only memory-only dedupe-eval', '--limit', '1'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /evaluations\/2099-01-02\.md/);
 });
 
 test('memory review suggests repeated candidates as patterns', () => {
