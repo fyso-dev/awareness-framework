@@ -466,7 +466,28 @@ function rememberCommand(ctx, opts) {
 }
 
 function recallCommand(ctx, query, opts) {
-  throw new Error('recall command is not implemented yet');
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const search = opts.query || query;
+  if (!search || search === true) {
+    throw new Error('Missing recall query. Use: awareness recall QUERY');
+  }
+  const limit = Number.parseInt(opts.limit || '10', 10);
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('Invalid --limit. Use an integer >= 1.');
+  }
+
+  const results = recallMatches(home, search, limit);
+  out(ctx, `Recall Results (${results.length})`);
+  if (!results.length) {
+    out(ctx, '- No matches.');
+    return 0;
+  }
+
+  for (const result of results) {
+    out(ctx, `- ${displayPath(home, result.file)}:${result.line}: ${result.text}`);
+  }
+  return 0;
 }
 
 function forgetCommand(ctx, opts) {
@@ -1576,6 +1597,47 @@ function readMemoryEvents(home) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+function collectRecallSources(home) {
+  return [
+    longTermMemoryPath(home),
+    memoryEventPath(home),
+    ...markdownFiles(path.join(home, 'worklog')),
+    ...markdownFiles(path.join(home, 'evaluations')),
+  ].filter((file) => fs.existsSync(file));
+}
+
+function markdownFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((name) => name.endsWith('.md'))
+    .sort()
+    .map((name) => path.join(dir, name));
+}
+
+function recallMatches(home, query, limit) {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const results = [];
+  for (const file of collectRecallSources(home)) {
+    const content = fs.readFileSync(file, 'utf8');
+    const lines = content.split('\n');
+    lines.forEach((line, index) => {
+      const haystack = line.toLowerCase();
+      const score = terms.filter((term) => haystack.includes(term)).length;
+      if (score > 0) {
+        results.push({
+          file,
+          line: index + 1,
+          score,
+          text: line.trim(),
+        });
+      }
+    });
+  }
+  return results
+    .sort((left, right) => right.score - left.score || left.file.localeCompare(right.file) || left.line - right.line)
+    .slice(0, limit);
 }
 
 function userMemoryPath(home, userSlug) {

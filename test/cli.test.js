@@ -321,6 +321,30 @@ test('remember records a promotion candidate and event', () => {
   assert.equal(event.source, 'remember');
 });
 
+test('recall searches memory, events, worklogs, and evaluations', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'Always run recall before implementing memory features',
+    '--evidence', 'Memory operations plan',
+  ], home);
+  run([
+    'log',
+    '--task', 'PROJECT-123',
+    '--summary', 'Validated recall behavior',
+    '--changes', 'Recall should search worklog text.',
+    '--evidence', 'test/cli.test.js',
+  ], home);
+
+  const result = run(['recall', 'recall behavior'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Recall Results/);
+  assert.match(result.stdout, /memory\/long-term\.md/);
+  assert.match(result.stdout, /worklog\/2099-01-02\.md/);
+});
+
 test('memory review suggests repeated candidates as patterns', () => {
   const home = tempHome();
   run(['init'], home);
