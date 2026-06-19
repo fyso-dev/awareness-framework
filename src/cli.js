@@ -3,21 +3,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  activeMemoryCandidates,
+  isPrunedMemoryText,
+  memoryCandidateExists,
+  memoryCandidateTextExists,
+  repeatedMemoryCandidateSuggestions,
+} from './memory-candidates.js';
+import { normalizeSearchText, recallTermGroups } from './text.js';
 
 const VALID_STATES = new Set(['started', 'in-progress', 'paused', 'blocked', 'waiting', 'done', 'in-review', 'ready']);
 const DEFAULT_STATE = 'in-progress';
 const STATE_ALIASES = {
   in_progress: 'in-progress',
   in_review: 'in-review',
-};
-const RECALL_ALIASES = {
-  memoria: ['memory'],
-  memorias: ['memory'],
-  memory: ['memoria', 'memorias'],
-  user: ['usuario', 'usuarios'],
-  users: ['usuario', 'usuarios'],
-  usuario: ['user', 'users'],
-  usuarios: ['user', 'users'],
 };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -370,8 +369,9 @@ function evaluateCommand(ctx, opts) {
   ensureDir(path.dirname(evaluationPath));
   fs.writeFileSync(evaluationPath, content);
   const candidates = recordEvaluationMemoryCandidates(home, today);
+  const candidateSummary = candidates.length ? `${candidates.length} recorded` : 'none';
   out(ctx, `Evaluation written: ${evaluationPath}`);
-  out(ctx, `Memory candidates: ${candidates.length ? `${candidates.length} recorded` : 'none'}`);
+  out(ctx, `Memory candidates: ${candidateSummary}`);
   return 0;
 }
 
@@ -575,7 +575,8 @@ function improveCommand(ctx, opts) {
   }
 
   out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
-  out(ctx, `Auto-generated candidates: ${evaluation.candidates ? `${evaluation.candidates.length} (from evaluation diagnostics)` : 'not changed'}`);
+  const candidateSummary = evaluation.candidates ? `${evaluation.candidates.length} (from evaluation diagnostics)` : 'not changed';
+  out(ctx, `Auto-generated candidates: ${candidateSummary}`);
   out(ctx, `Pattern suggestions: ${suggestions.length}`);
   for (const suggestion of suggestions) {
     out(ctx, `- ${suggestion.text} (${suggestion.count} observations)`);
@@ -789,7 +790,10 @@ function scheduleRunCommand(ctx, opts) {
   out(ctx, `Schedule run complete: ${cadence}`);
   out(ctx, `Runtime log: ${eventFile}`);
   if (evaluation) out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
-  if (evaluation?.candidates) out(ctx, `Memory candidates: ${evaluation.candidates.length ? `${evaluation.candidates.length} recorded` : 'none'}`);
+  if (evaluation?.candidates) {
+    const candidateSummary = evaluation.candidates.length ? `${evaluation.candidates.length} recorded` : 'none';
+    out(ctx, `Memory candidates: ${candidateSummary}`);
+  }
   out(ctx, warnings.length ? `Warnings: ${warnings.length}` : 'Warnings: none');
   return 0;
 }
@@ -828,7 +832,8 @@ function scheduleInstallCommand(ctx, opts) {
     if (opts.load) {
       const result = loadLaunchAgent(file, label);
       if (result.status !== 0) {
-        throw new Error(`launchctl failed for ${file}: ${result.stderr || result.stdout || `exit ${result.status}`}`);
+        const failure = result.stderr || result.stdout || `exit ${result.status}`;
+        throw new Error(`launchctl failed for ${file}: ${failure}`);
       }
       loaded.push(file);
     }
@@ -1108,6 +1113,7 @@ function buildEvaluation(home, today) {
   const handoff = /- Next:\s+(?!The next concrete action)\S+/.test(extractSection(current, 'Current Focus')) ? 2 : current ? 1 : 0;
   const noise = current.split('\n').length <= 180 && !/YYYY-MM-DD|branch-name/.test(current) ? 2 : 1;
   const reporting = sectionHasMeaningfulContent(extractSection(current, 'End-of-Day Candidates')) ? 2 : entries.length ? 1 : 0;
+  const warningsMarkdown = warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- None.';
 
   return `# Awareness Evaluation - ${today.date}
 
@@ -1123,7 +1129,7 @@ function buildEvaluation(home, today) {
 
 ## Warnings
 
-${warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- None.'}
+${warningsMarkdown}
 
 ## Proposed Changes
 
@@ -1202,71 +1208,6 @@ function appendMemoryCandidate(home, today, text, evidence, source = 'memory.not
   return true;
 }
 
-function memoryCandidateExists(content, text, evidence) {
-  const candidates = extractSection(content, 'Promotion Candidates');
-  return candidates.split('\n').some((line) => line.includes(`: ${text} (evidence: ${evidence})`));
-}
-
-function memoryCandidateTextExists(content, text) {
-  const key = normalizeMemoryCandidateText(text);
-  return parseMemoryCandidates(content).some((candidate) => normalizeMemoryCandidateText(candidate.text) === key);
-}
-
-function repeatedMemoryCandidateSuggestions(content, minCount) {
-  const grouped = new Map();
-  for (const candidate of activeMemoryCandidates(content)) {
-    const key = normalizeMemoryCandidateText(candidate.text);
-    const group = grouped.get(key) || { text: candidate.text, count: 0, evidence: [] };
-    group.count += 1;
-    group.evidence.push(candidate.evidence);
-    grouped.set(key, group);
-  }
-
-  return [...grouped.values()]
-    .filter((group) => group.count >= minCount)
-    .map((group) => ({
-      text: group.text,
-      count: group.count,
-      evidence: [...new Set(group.evidence)].join('; '),
-    }))
-    .sort((left, right) => right.count - left.count || left.text.localeCompare(right.text));
-}
-
-function activeMemoryCandidates(content) {
-  const prunedTexts = prunedMemoryCandidateTexts(content);
-  return parseMemoryCandidates(content).filter((candidate) => !prunedTexts.has(normalizeMemoryCandidateText(candidate.text)));
-}
-
-function parseMemoryCandidates(content) {
-  return extractSection(content, 'Promotion Candidates')
-    .split('\n')
-    .map((line) => line.trim())
-    .map((line) => line.match(/^- \d{4}-\d{2}-\d{2}: (.+) \(evidence: (.+)\)$/))
-    .filter(Boolean)
-    .map((match) => ({
-      line: match[0],
-      text: match[1],
-      evidence: match[2],
-    }));
-}
-
-function isPrunedMemoryText(content, text) {
-  return prunedMemoryCandidateTexts(content).has(normalizeMemoryCandidateText(text));
-}
-
-function prunedMemoryCandidateTexts(content) {
-  return new Set(extractSection(content, 'Pruned Or Revised')
-    .split('\n')
-    .map((line) => line.trim())
-    .map((line) => line.match(/^- \d{4}-\d{2}-\d{2}: (.+) \(reason: .+; evidence: .+\)$/))
-    .filter(Boolean)
-    .map((match) => normalizeMemoryCandidateText(match[1])));
-}
-
-function normalizeMemoryCandidateText(text) {
-  return normalizeSearchText(text);
-}
-
 function shellQuoteText(text) {
   return text.replace(/["\\$`]/g, '\\$&');
 }
@@ -1308,7 +1249,7 @@ function parseWorklogEntries(worklog) {
     const headingText = heading[0];
     const headingParts = headingText.replace(/^#{2,3} \d{2}:\d{2} - /, '').split(' - ');
     const headingTask = headingParts.length > 1 && isTaskId(headingParts[0]) ? headingParts[0] : null;
-    const jiraTask = block.match(/^- Jira:\s+(.+)$/m)?.[1]?.trim();
+    const jiraTask = metadataValue(block, 'Jira');
     return {
       block,
       task: headingTask || jiraTask || null,
@@ -1379,12 +1320,13 @@ function replaceSection(content, section, body) {
 function appendToSection(content, section, addition) {
   const current = extractSection(content, section);
   const cleaned = current.replace(/^- None yet\.\n?/m, '').trimEnd();
-  return replaceSection(content, section, `${cleaned ? `${cleaned}\n\n` : ''}${addition.trimEnd()}\n`);
+  const prefix = cleaned ? `${cleaned}\n\n` : '';
+  return replaceSection(content, section, `${prefix}${addition.trimEnd()}\n`);
 }
 
 function extractSection(content, section) {
   const pattern = new RegExp(`(?:^|\\n)## ${escapeRegExp(section)}\\n\\n?([\\s\\S]*?)(?=\\n## |$)`);
-  const match = content.match(pattern);
+  const match = pattern.exec(content);
   return match ? match[1] : '';
 }
 
@@ -1396,12 +1338,18 @@ function replaceMetadata(content, key, value) {
   return content.replace(/^# .+$/m, (heading) => `${heading}\n\n- ${key}: ${value}`);
 }
 
+function metadataValue(content, key) {
+  const prefix = `- ${key}:`;
+  const line = content.split('\n').find((candidate) => candidate.startsWith(prefix));
+  return line?.slice(prefix.length).trim() || null;
+}
+
 function currentContext(home) {
   const file = awarenessPath(home);
   if (!fs.existsSync(file)) return 'Not specified';
   const focus = extractSection(fs.readFileSync(file, 'utf8'), 'Current Focus');
-  const repo = focus.match(/^- Repository:\s+(.+)$/m)?.[1] || 'Not specified';
-  const branch = focus.match(/^- Branch:\s+(.+)$/m)?.[1] || 'Not specified';
+  const repo = metadataValue(focus, 'Repository') || 'Not specified';
+  const branch = metadataValue(focus, 'Branch') || 'Not specified';
   return `${repo} / ${branch}`;
 }
 
@@ -1600,9 +1548,13 @@ function expandTargets(value, allowed) {
 
 function required(opts, key) {
   if (!opts[key] || opts[key] === true) {
-    throw new Error(`Missing required option: --${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`);
+    throw new Error(`Missing required option: --${optionName(key)}`);
   }
   return opts[key];
+}
+
+function optionName(key) {
+  return key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 }
 
 function agentsHome(ctx, opts) {
@@ -1764,32 +1716,6 @@ function recallMatches(home, query, limit) {
   }
   results.sort((left, right) => right.score - left.score || left.file.localeCompare(right.file) || left.line - right.line);
   return results.slice(0, limit);
-}
-
-function recallTermGroups(query) {
-  return normalizeSearchText(query)
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((term) => new Set([term, ...recallTokenVariants(term), ...(RECALL_ALIASES[term] || [])]))
-    .map((terms) => [...terms].filter(Boolean))
-    .filter((terms, index, groups) => groups.findIndex((group) => group[0] === terms[0]) === index);
-}
-
-function recallTokenVariants(term) {
-  const variants = [];
-  if (term.endsWith('es') && term.length > 4) variants.push(term.slice(0, -2));
-  if (term.endsWith('s') && term.length > 3) variants.push(term.slice(0, -1));
-  return variants;
-}
-
-function normalizeSearchText(text) {
-  return String(text)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function userMemoryPath(home, userSlug) {
