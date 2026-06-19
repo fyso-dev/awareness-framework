@@ -3,9 +3,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  activeMemoryCandidates,
+  isPrunedMemoryText,
+  memoryCandidateExists,
+  memoryCandidateTextExists,
+  repeatedMemoryCandidateSuggestions,
+} from './memory-candidates.js';
+import { normalizeSearchText, recallTermGroups } from './text.js';
 
 const VALID_STATES = new Set(['started', 'in-progress', 'paused', 'blocked', 'waiting', 'done', 'in-review', 'ready']);
 const DEFAULT_STATE = 'in-progress';
+const STATE_ALIASES = {
+  in_progress: 'in-progress',
+  in_review: 'in-review',
+};
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
@@ -142,6 +154,9 @@ Scope options:
   --channel NAME              Store state under <folder>/channels/<safe-name>.
   --user ID                   Select a user memory file for user commands.
 
+State values:
+  ${[...VALID_STATES].join(', ')}
+
 The CLI maintains private files under ~/.agents by default. It does not post to Jira, GitHub, or any external system.`);
 }
 
@@ -209,7 +224,7 @@ function statusCommand(ctx, opts) {
   for (const warning of warnings) {
     out(ctx, `- ${warning}`);
   }
-  return warnings.length ? 1 : 0;
+  return 0;
 }
 
 function checkCommand(ctx, opts) {
@@ -330,7 +345,7 @@ function handoffCommand(ctx, opts) {
     }
   }
 
-  return warnings.length ? 1 : 0;
+  return 0;
 }
 
 function evaluateCommand(ctx, opts) {
@@ -354,8 +369,9 @@ function evaluateCommand(ctx, opts) {
   ensureDir(path.dirname(evaluationPath));
   fs.writeFileSync(evaluationPath, content);
   const candidates = recordEvaluationMemoryCandidates(home, today);
+  const candidateSummary = candidates.length ? `${candidates.length} recorded` : 'none';
   out(ctx, `Evaluation written: ${evaluationPath}`);
-  out(ctx, `Memory candidates: ${candidates.length ? `${candidates.length} recorded` : 'none'}`);
+  out(ctx, `Memory candidates: ${candidateSummary}`);
   return 0;
 }
 
@@ -382,8 +398,11 @@ function memoryCommand(ctx, subcommand, opts) {
 
 function memoryCandidatesCommand(ctx, home) {
   const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
+  const activeCandidates = activeMemoryCandidates(content)
+    .map((candidate) => candidate.line)
+    .join('\n');
   out(ctx, 'Promotion Candidates');
-  out(ctx, extractSection(content, 'Promotion Candidates').trim() || '- None yet.');
+  out(ctx, activeCandidates || '- None yet.');
   return 0;
 }
 
@@ -427,6 +446,9 @@ function memoryPromoteCommand(ctx, home, opts) {
   const today = todayParts(ctx);
   const file = longTermMemoryPath(home);
   let content = fs.readFileSync(file, 'utf8');
+  if (isPrunedMemoryText(content, text)) {
+    throw new Error(`Cannot promote pruned or revised memory: ${text}`);
+  }
   content = replaceMetadata(content, 'Updated', formatTimestamp(today));
   content = appendToSection(content, section, `- ${today.date}: ${text} (evidence: ${evidence})\n`);
   fs.writeFileSync(file, content);
@@ -553,7 +575,8 @@ function improveCommand(ctx, opts) {
   }
 
   out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
-  out(ctx, `Memory candidates: ${evaluation.candidates ? evaluation.candidates.length : 'not changed'}`);
+  const candidateSummary = evaluation.candidates ? `${evaluation.candidates.length} (from evaluation diagnostics)` : 'not changed';
+  out(ctx, `Auto-generated candidates: ${candidateSummary}`);
   out(ctx, `Pattern suggestions: ${suggestions.length}`);
   for (const suggestion of suggestions) {
     out(ctx, `- ${suggestion.text} (${suggestion.count} observations)`);
@@ -767,7 +790,10 @@ function scheduleRunCommand(ctx, opts) {
   out(ctx, `Schedule run complete: ${cadence}`);
   out(ctx, `Runtime log: ${eventFile}`);
   if (evaluation) out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
-  if (evaluation?.candidates) out(ctx, `Memory candidates: ${evaluation.candidates.length ? `${evaluation.candidates.length} recorded` : 'none'}`);
+  if (evaluation?.candidates) {
+    const candidateSummary = evaluation.candidates.length ? `${evaluation.candidates.length} recorded` : 'none';
+    out(ctx, `Memory candidates: ${candidateSummary}`);
+  }
   out(ctx, warnings.length ? `Warnings: ${warnings.length}` : 'Warnings: none');
   return 0;
 }
@@ -806,7 +832,8 @@ function scheduleInstallCommand(ctx, opts) {
     if (opts.load) {
       const result = loadLaunchAgent(file, label);
       if (result.status !== 0) {
-        throw new Error(`launchctl failed for ${file}: ${result.stderr || result.stdout || `exit ${result.status}`}`);
+        const failure = result.stderr || result.stdout || `exit ${result.status}`;
+        throw new Error(`launchctl failed for ${file}: ${failure}`);
       }
       loaded.push(file);
     }
@@ -1086,6 +1113,7 @@ function buildEvaluation(home, today) {
   const handoff = /- Next:\s+(?!The next concrete action)\S+/.test(extractSection(current, 'Current Focus')) ? 2 : current ? 1 : 0;
   const noise = current.split('\n').length <= 180 && !/YYYY-MM-DD|branch-name/.test(current) ? 2 : 1;
   const reporting = sectionHasMeaningfulContent(extractSection(current, 'End-of-Day Candidates')) ? 2 : entries.length ? 1 : 0;
+  const warningsMarkdown = warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- None.';
 
   return `# Awareness Evaluation - ${today.date}
 
@@ -1101,7 +1129,7 @@ function buildEvaluation(home, today) {
 
 ## Warnings
 
-${warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- None.'}
+${warningsMarkdown}
 
 ## Proposed Changes
 
@@ -1112,7 +1140,9 @@ ${warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- No
 
 function recordEvaluationMemoryCandidates(home, today) {
   const candidates = buildEvaluationMemoryCandidates(home, today);
-  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence, 'evaluation'));
+  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence, 'evaluation', {
+    dedupeByText: true,
+  }));
 }
 
 function buildEvaluationMemoryCandidates(home, today) {
@@ -1159,10 +1189,12 @@ function buildEvaluationMemoryCandidates(home, today) {
   return candidates;
 }
 
-function appendMemoryCandidate(home, today, text, evidence, source = 'memory.note') {
+function appendMemoryCandidate(home, today, text, evidence, source = 'memory.note', opts = {}) {
   const file = longTermMemoryPath(home);
   let content = fs.readFileSync(file, 'utf8');
   if (memoryCandidateExists(content, text, evidence)) return false;
+  if (isPrunedMemoryText(content, text)) return false;
+  if (opts.dedupeByText && memoryCandidateTextExists(content, text)) return false;
 
   content = replaceMetadata(content, 'Updated', formatTimestamp(today));
   content = appendToSection(content, 'Promotion Candidates', `- ${today.date}: ${text} (evidence: ${evidence})\n`);
@@ -1174,58 +1206,6 @@ function appendMemoryCandidate(home, today, text, evidence, source = 'memory.not
     evidence,
   });
   return true;
-}
-
-function memoryCandidateExists(content, text, evidence) {
-  const candidates = extractSection(content, 'Promotion Candidates');
-  return candidates.split('\n').some((line) => line.includes(`: ${text} (evidence: ${evidence})`));
-}
-
-function repeatedMemoryCandidateSuggestions(content, minCount) {
-  const grouped = new Map();
-  const prunedTexts = prunedMemoryCandidateTexts(content);
-  for (const candidate of parseMemoryCandidates(content)) {
-    const key = normalizeMemoryCandidateText(candidate.text);
-    if (prunedTexts.has(key)) continue;
-    const group = grouped.get(key) || { text: candidate.text, count: 0, evidence: [] };
-    group.count += 1;
-    group.evidence.push(candidate.evidence);
-    grouped.set(key, group);
-  }
-
-  return [...grouped.values()]
-    .filter((group) => group.count >= minCount)
-    .map((group) => ({
-      text: group.text,
-      count: group.count,
-      evidence: [...new Set(group.evidence)].join('; '),
-    }))
-    .sort((left, right) => right.count - left.count || left.text.localeCompare(right.text));
-}
-
-function parseMemoryCandidates(content) {
-  return extractSection(content, 'Promotion Candidates')
-    .split('\n')
-    .map((line) => line.trim())
-    .map((line) => line.match(/^- \d{4}-\d{2}-\d{2}: (.+) \(evidence: (.+)\)$/))
-    .filter(Boolean)
-    .map((match) => ({
-      text: match[1],
-      evidence: match[2],
-    }));
-}
-
-function prunedMemoryCandidateTexts(content) {
-  return new Set(extractSection(content, 'Pruned Or Revised')
-    .split('\n')
-    .map((line) => line.trim())
-    .map((line) => line.match(/^- \d{4}-\d{2}-\d{2}: (.+) \(reason: .+; evidence: .+\)$/))
-    .filter(Boolean)
-    .map((match) => normalizeMemoryCandidateText(match[1])));
-}
-
-function normalizeMemoryCandidateText(text) {
-  return text.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 function shellQuoteText(text) {
@@ -1269,7 +1249,7 @@ function parseWorklogEntries(worklog) {
     const headingText = heading[0];
     const headingParts = headingText.replace(/^#{2,3} \d{2}:\d{2} - /, '').split(' - ');
     const headingTask = headingParts.length > 1 && isTaskId(headingParts[0]) ? headingParts[0] : null;
-    const jiraTask = block.match(/^- Jira:\s+(.+)$/m)?.[1]?.trim();
+    const jiraTask = metadataValue(block, 'Jira');
     return {
       block,
       task: headingTask || jiraTask || null,
@@ -1340,12 +1320,13 @@ function replaceSection(content, section, body) {
 function appendToSection(content, section, addition) {
   const current = extractSection(content, section);
   const cleaned = current.replace(/^- None yet\.\n?/m, '').trimEnd();
-  return replaceSection(content, section, `${cleaned ? `${cleaned}\n\n` : ''}${addition.trimEnd()}\n`);
+  const prefix = cleaned ? `${cleaned}\n\n` : '';
+  return replaceSection(content, section, `${prefix}${addition.trimEnd()}\n`);
 }
 
 function extractSection(content, section) {
   const pattern = new RegExp(`(?:^|\\n)## ${escapeRegExp(section)}\\n\\n?([\\s\\S]*?)(?=\\n## |$)`);
-  const match = content.match(pattern);
+  const match = pattern.exec(content);
   return match ? match[1] : '';
 }
 
@@ -1357,12 +1338,18 @@ function replaceMetadata(content, key, value) {
   return content.replace(/^# .+$/m, (heading) => `${heading}\n\n- ${key}: ${value}`);
 }
 
+function metadataValue(content, key) {
+  const prefix = `- ${key}:`;
+  const line = content.split('\n').find((candidate) => candidate.startsWith(prefix));
+  return line?.slice(prefix.length).trim() || null;
+}
+
 function currentContext(home) {
   const file = awarenessPath(home);
   if (!fs.existsSync(file)) return 'Not specified';
   const focus = extractSection(fs.readFileSync(file, 'utf8'), 'Current Focus');
-  const repo = focus.match(/^- Repository:\s+(.+)$/m)?.[1] || 'Not specified';
-  const branch = focus.match(/^- Branch:\s+(.+)$/m)?.[1] || 'Not specified';
+  const repo = metadataValue(focus, 'Repository') || 'Not specified';
+  const branch = metadataValue(focus, 'Branch') || 'Not specified';
   return `${repo} / ${branch}`;
 }
 
@@ -1540,10 +1527,11 @@ function initialUserMemory(user, timestamp) {
 }
 
 function normalizeState(state) {
-  if (!VALID_STATES.has(state)) {
+  const normalized = STATE_ALIASES[state] || String(state).replaceAll('_', '-');
+  if (!VALID_STATES.has(normalized)) {
     throw new Error(`Invalid state: ${state}. Valid states: ${[...VALID_STATES].join(', ')}`);
   }
-  return state;
+  return normalized;
 }
 
 function expandTargets(value, allowed) {
@@ -1560,9 +1548,13 @@ function expandTargets(value, allowed) {
 
 function required(opts, key) {
   if (!opts[key] || opts[key] === true) {
-    throw new Error(`Missing required option: --${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`);
+    throw new Error(`Missing required option: --${optionName(key)}`);
   }
   return opts[key];
+}
+
+function optionName(key) {
+  return key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 }
 
 function agentsHome(ctx, opts) {
@@ -1704,14 +1696,14 @@ function markdownFilesRecursive(dir) {
 }
 
 function recallMatches(home, query, limit) {
-  const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))];
+  const termGroups = recallTermGroups(query);
   const results = [];
   for (const file of collectRecallSources(home)) {
     const content = fs.readFileSync(file, 'utf8');
     const lines = content.split('\n');
     lines.forEach((line, index) => {
-      const haystack = line.toLowerCase();
-      const score = terms.filter((term) => haystack.includes(term)).length;
+      const haystack = normalizeSearchText(line);
+      const score = termGroups.filter((terms) => terms.some((term) => haystack.includes(term))).length;
       if (score > 0) {
         results.push({
           file,

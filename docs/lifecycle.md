@@ -74,12 +74,16 @@ When switching tasks, the agent:
 
 Valid states:
 
+- `started`
 - `in-progress`
 - `paused`
 - `blocked`
 - `waiting`
 - `done`
 - `in-review`
+- `ready`
+
+The CLI also accepts underscore aliases such as `in_progress` and normalizes them to hyphenated state names.
 
 ## 5. Handoff
 

@@ -118,7 +118,7 @@ awareness init --wrappers \
 
 ### `status`
 
-Shows the current focus and warnings.
+Shows the current focus and warnings. Warnings are printed but do not make the command fail; use `awareness check --strict` when automation should fail on warnings.
 
 ```bash
 awareness status
@@ -153,8 +153,11 @@ awareness focus \
   --summary "Agent awareness framework" \
   --repo fyso-dev/awareness-framework \
   --branch codex/cli-and-personality \
+  --state in-progress \
   --next "Run tests and open a PR"
 ```
+
+Valid states are `started`, `in-progress`, `paused`, `blocked`, `waiting`, `done`, `in-review`, and `ready`. Underscore aliases such as `in_progress` and `in_review` are accepted and normalized.
 
 ### `log`
 
@@ -170,7 +173,7 @@ awareness log \
 
 ### `handoff`
 
-Prints a handoff snapshot from the awareness board.
+Prints a handoff snapshot from the awareness board. Like `status`, warnings are informational and return exit code 0.
 
 ```bash
 awareness handoff
@@ -202,6 +205,8 @@ awareness memory promote --kind preference --text "Surface memory candidates pro
 
 `memory review` scans promotion candidates and suggests repeated candidates as `pattern` promotions once they appear at least twice by default.
 
+`memory candidates` lists active promotion candidates only. Text that has been pruned or revised remains in the Markdown history but is hidden from active candidates, excluded from suggestions, and rejected by `memory promote`.
+
 Valid promotion kinds are `preference`, `pattern`, `project`, and `review`.
 
 ### Local memory operations
@@ -216,9 +221,9 @@ awareness improve
 ```
 
 `remember` records a promotion candidate and appends `memory.candidate.created` to `memory/events.jsonl`.
-`recall` performs deterministic local text search across memory, memory events, worklogs, and evaluations.
-`forget` records a prune/revision entry and appends `memory.pruned`; it does not destructively delete historical evidence.
-`improve` runs the evaluation/review loop and appends `evaluation.created` and `pattern.suggested` events when applicable.
+`recall` performs deterministic local text search across memory, memory events, worklogs, and evaluations. Matching is case- and accent-insensitive, includes simple singular/plural normalization, and includes a small English/Spanish alias set for memory/user terms.
+`forget` records a prune/revision entry and appends `memory.pruned`; it does not destructively delete historical evidence, but pruned text is inactive for candidate review and promotion.
+`improve` runs the evaluation/review loop and appends `evaluation.created` and `pattern.suggested` events when applicable. Auto-generated evaluation candidates are deduplicated by text across days so recurring diagnostics do not flood human-curated candidates.
 
 ### `hook run`
 

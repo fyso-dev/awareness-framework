@@ -115,7 +115,7 @@ Each evaluation should end with one of these outcomes:
 - Propose framework PR.
 - Ask user for confirmation.
 
-Daily evaluation is active by default: when it writes an evaluation note, the CLI also records promotion candidates under `memory/long-term.md`. Candidates are intentionally reviewable. Use `awareness memory review` to surface repeated candidates as suggested `pattern` promotions, then promote them with `awareness memory promote` only after they are user-confirmed, repeated, or operationally important.
+Daily evaluation is active by default: when it writes an evaluation note, the CLI also records promotion candidates under `memory/long-term.md`. Auto-generated candidates are deduplicated by text across days so repeated diagnostics do not crowd out human-curated observations. Candidates are intentionally reviewable. Use `awareness memory review` to surface repeated candidates as suggested `pattern` promotions, then promote them with `awareness memory promote` only after they are user-confirmed, repeated, operationally important, and not pruned or revised.
 
 ## Example Outcomes
 

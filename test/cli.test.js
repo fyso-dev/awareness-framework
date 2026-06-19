@@ -11,8 +11,8 @@ function run(argv, home, env = {}) {
   const code = runCli([...argv, '--home', home], {
     env: {
       ...process.env,
-      ...env,
       AWARENESS_NOW: '2099-01-02T12:34:00.000Z',
+      ...env,
     },
     stdout: { write: (chunk) => { stdout += chunk; } },
     stderr: { write: (chunk) => { stderr += chunk; } },
@@ -75,6 +75,7 @@ test('channel scope stores private files under a channel-specific folder', () =>
   assert.equal(fs.existsSync(path.join(home, 'awareness', 'current.md')), false);
 
   const status = run(['status', '--channel', '#Support Desk'], home);
+  assert.equal(status.code, 0);
   assert.match(status.stdout, /channels\/support-desk/);
 });
 
@@ -141,6 +142,38 @@ test('focus updates awareness and appends worklog', () => {
   assert.match(worklog, /Focus switched: Build awareness CLI/);
 });
 
+test('focus accepts underscore state aliases and help lists state values', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run([
+    'focus',
+    '--task', 'PROJECT-123',
+    '--summary', 'Build awareness CLI',
+    '--repo', 'fyso-dev/awareness-framework',
+    '--branch', 'codex/cli-and-personality',
+    '--state', 'in_progress',
+    '--next', 'Run tests',
+  ], home);
+
+  assert.equal(result.code, 0);
+  const current = fs.readFileSync(path.join(home, 'awareness', 'current.md'), 'utf8');
+  assert.match(current, /- State: in-progress/);
+
+  let stdout = '';
+  const helpCode = runCli(['help'], {
+    env: {
+      ...process.env,
+      AWARENESS_NOW: '2099-01-02T12:34:00.000Z',
+    },
+    stdout: { write: (chunk) => { stdout += chunk; } },
+    stderr: { write: () => {} },
+  });
+  assert.equal(helpCode, 0);
+  assert.match(stdout, /State values:/);
+  assert.match(stdout, /started, in-progress, paused, blocked, waiting, done, in-review, ready/);
+});
+
 test('log appends a concrete entry', () => {
   const home = tempHome();
   run(['init'], home);
@@ -176,6 +209,19 @@ test('refresh aliases status and reloads current focus', () => {
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Current Focus/);
   assert.match(result.stdout, /PROJECT-123/);
+});
+
+test('status and handoff return success when only warnings are present', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const status = run(['status'], home);
+  const handoff = run(['handoff'], home);
+
+  assert.equal(status.code, 0);
+  assert.match(status.stdout, /Warnings: 1/);
+  assert.equal(handoff.code, 0);
+  assert.match(handoff.stdout, /Warnings/);
 });
 
 test('check recognizes legacy worklog entries with Jira metadata', () => {
@@ -365,6 +411,18 @@ test('recall searches memory, events, worklogs, and evaluations', () => {
   assert.match(result.stdout, /evaluations\/2099-01-02\.md/);
 });
 
+test('recall uses normalized aliases for English and Spanish memory terms', () => {
+  const home = tempHome();
+  run(['init'], home);
+  fs.writeFileSync(path.join(home, 'memory', 'users', 'alice.md'), '- memoria por usuario: proyecto activo\n');
+
+  const result = run(['recall', 'user memory'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /memory\/users\/alice\.md/);
+  assert.match(result.stdout, /memoria por usuario/);
+});
+
 test('forget records a pruned memory without deleting history', () => {
   const home = tempHome();
   run(['init'], home);
@@ -392,11 +450,42 @@ test('forget records a pruned memory without deleting history', () => {
   assert.match(candidates, /Temporary memory to revise/);
   assert.match(candidates, /Initial observation/);
 
+  const visibleCandidates = run(['memory', 'candidates'], home);
+  assert.equal(visibleCandidates.code, 0);
+  assert.doesNotMatch(visibleCandidates.stdout, /Temporary memory to revise/);
+
   const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line));
   assert.equal(events.at(-1).type, 'memory.pruned');
+});
+
+test('memory promote rejects pruned memory text', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'Temporary memory to revise',
+    '--evidence', 'Initial observation',
+  ], home);
+  run([
+    'forget',
+    '--text', 'Temporary memory to revise',
+    '--reason', 'Superseded by explicit user correction',
+    '--evidence', 'User correction',
+  ], home);
+
+  const promote = run([
+    'memory',
+    'promote',
+    '--kind', 'preference',
+    '--text', 'Temporary memory to revise',
+    '--evidence', 'Should be blocked',
+  ], home);
+
+  assert.equal(promote.code, 1);
+  assert.match(promote.stderr, /Cannot promote pruned or revised memory/);
 });
 
 test('improve writes evaluation and surfaces repeated pattern suggestions', () => {
@@ -417,6 +506,7 @@ test('improve writes evaluation and surfaces repeated pattern suggestions', () =
 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Evaluation:/);
+  assert.match(result.stdout, /Auto-generated candidates: \d+ \(from evaluation diagnostics\)/);
   assert.match(result.stdout, /Pattern suggestions: 1/);
   assert.match(result.stdout, /Improve traceability before handoff/);
   assert.equal(fs.existsSync(path.join(home, 'evaluations', '2099-01-02.md')), true);
@@ -426,6 +516,23 @@ test('improve writes evaluation and surfaces repeated pattern suggestions', () =
     .split('\n')
     .map((line) => JSON.parse(line));
   assert.equal(events.at(-1).type, 'pattern.suggested');
+});
+
+test('improve dedupes auto-generated candidates by text across days', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const first = run(['improve'], home, { AWARENESS_NOW: '2099-01-01T12:34:00.000Z' });
+  const second = run(['improve'], home, { AWARENESS_NOW: '2099-01-02T12:34:00.000Z' });
+
+  assert.equal(first.code, 0);
+  assert.equal(second.code, 0);
+  assert.match(first.stdout, /Auto-generated candidates: 1 \(from evaluation diagnostics\)/);
+  assert.match(second.stdout, /Auto-generated candidates: 0 \(from evaluation diagnostics\)/);
+
+  const memory = fs.readFileSync(path.join(home, 'memory', 'long-term.md'), 'utf8');
+  const occurrences = memory.match(/Review recurring awareness warning: Daily worklog has no entries/g) || [];
+  assert.equal(occurrences.length, 1);
 });
 
 test('improve does not log evaluation created for existing evaluation', () => {
@@ -549,6 +656,7 @@ test('help lists local memory operation commands', () => {
   assert.match(stdout, /awareness recall QUERY/);
   assert.match(stdout, /awareness forget --text TEXT --reason TEXT --evidence TEXT/);
   assert.match(stdout, /awareness improve/);
+  assert.match(stdout, /State values:/);
 });
 
 test('documentation mentions local memory operations', () => {

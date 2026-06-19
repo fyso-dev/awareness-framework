@@ -19,7 +19,7 @@ Do not load every layer into every prompt. Load the smallest layer that answers 
 Awareness uses a small local operation vocabulary:
 
 - `remember`: capture an evidence-backed candidate.
-- `recall`: search local memory, events, worklogs, and evaluations.
+- `recall`: search local memory, events, worklogs, and evaluations with deterministic normalized text matching.
 - `forget`: prune or revise stale memory without destructive deletion.
 - `improve`: run evaluation plus memory review to surface repeated candidates.
 
@@ -113,10 +113,13 @@ Information should move from short-term to long-term only when it earns promotio
 
 Hooks and scheduled maintenance may perform steps 1 and 2 by recording observations, warnings, or evaluation notes. They must not perform step 4 silently.
 
+Pruned or revised text remains in the Markdown history for auditability, but it is inactive. It should not appear in active candidate listings, repeated-candidate suggestions, or promotion commands.
+
 ## Promotion Rules
 
 - Promote explicit user preferences immediately when they affect future collaboration.
 - Promote inferred preferences only after repeated evidence.
+- Do not promote text that has been pruned or revised; record a new corrected candidate instead.
 - Promote framework changes only through version control.
 - Keep private memory private; do not copy private examples into public docs.
 - Prefer small, operational statements over long stories.
