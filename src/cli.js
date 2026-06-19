@@ -6,6 +6,19 @@ import { fileURLToPath } from 'node:url';
 
 const VALID_STATES = new Set(['started', 'in-progress', 'paused', 'blocked', 'waiting', 'done', 'in-review', 'ready']);
 const DEFAULT_STATE = 'in-progress';
+const STATE_ALIASES = {
+  in_progress: 'in-progress',
+  in_review: 'in-review',
+};
+const RECALL_ALIASES = {
+  memoria: ['memory'],
+  memorias: ['memory'],
+  memory: ['memoria', 'memorias'],
+  user: ['usuario', 'usuarios'],
+  users: ['usuario', 'usuarios'],
+  usuario: ['user', 'users'],
+  usuarios: ['user', 'users'],
+};
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
@@ -142,6 +155,9 @@ Scope options:
   --channel NAME              Store state under <folder>/channels/<safe-name>.
   --user ID                   Select a user memory file for user commands.
 
+State values:
+  ${[...VALID_STATES].join(', ')}
+
 The CLI maintains private files under ~/.agents by default. It does not post to Jira, GitHub, or any external system.`);
 }
 
@@ -209,7 +225,7 @@ function statusCommand(ctx, opts) {
   for (const warning of warnings) {
     out(ctx, `- ${warning}`);
   }
-  return warnings.length ? 1 : 0;
+  return 0;
 }
 
 function checkCommand(ctx, opts) {
@@ -330,7 +346,7 @@ function handoffCommand(ctx, opts) {
     }
   }
 
-  return warnings.length ? 1 : 0;
+  return 0;
 }
 
 function evaluateCommand(ctx, opts) {
@@ -382,8 +398,11 @@ function memoryCommand(ctx, subcommand, opts) {
 
 function memoryCandidatesCommand(ctx, home) {
   const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
+  const activeCandidates = activeMemoryCandidates(content)
+    .map((candidate) => candidate.line)
+    .join('\n');
   out(ctx, 'Promotion Candidates');
-  out(ctx, extractSection(content, 'Promotion Candidates').trim() || '- None yet.');
+  out(ctx, activeCandidates || '- None yet.');
   return 0;
 }
 
@@ -427,6 +446,9 @@ function memoryPromoteCommand(ctx, home, opts) {
   const today = todayParts(ctx);
   const file = longTermMemoryPath(home);
   let content = fs.readFileSync(file, 'utf8');
+  if (isPrunedMemoryText(content, text)) {
+    throw new Error(`Cannot promote pruned or revised memory: ${text}`);
+  }
   content = replaceMetadata(content, 'Updated', formatTimestamp(today));
   content = appendToSection(content, section, `- ${today.date}: ${text} (evidence: ${evidence})\n`);
   fs.writeFileSync(file, content);
@@ -553,7 +575,7 @@ function improveCommand(ctx, opts) {
   }
 
   out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
-  out(ctx, `Memory candidates: ${evaluation.candidates ? evaluation.candidates.length : 'not changed'}`);
+  out(ctx, `Auto-generated candidates: ${evaluation.candidates ? `${evaluation.candidates.length} (from evaluation diagnostics)` : 'not changed'}`);
   out(ctx, `Pattern suggestions: ${suggestions.length}`);
   for (const suggestion of suggestions) {
     out(ctx, `- ${suggestion.text} (${suggestion.count} observations)`);
@@ -1112,7 +1134,9 @@ ${warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- No
 
 function recordEvaluationMemoryCandidates(home, today) {
   const candidates = buildEvaluationMemoryCandidates(home, today);
-  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence, 'evaluation'));
+  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence, 'evaluation', {
+    dedupeByText: true,
+  }));
 }
 
 function buildEvaluationMemoryCandidates(home, today) {
@@ -1159,10 +1183,12 @@ function buildEvaluationMemoryCandidates(home, today) {
   return candidates;
 }
 
-function appendMemoryCandidate(home, today, text, evidence, source = 'memory.note') {
+function appendMemoryCandidate(home, today, text, evidence, source = 'memory.note', opts = {}) {
   const file = longTermMemoryPath(home);
   let content = fs.readFileSync(file, 'utf8');
   if (memoryCandidateExists(content, text, evidence)) return false;
+  if (isPrunedMemoryText(content, text)) return false;
+  if (opts.dedupeByText && memoryCandidateTextExists(content, text)) return false;
 
   content = replaceMetadata(content, 'Updated', formatTimestamp(today));
   content = appendToSection(content, 'Promotion Candidates', `- ${today.date}: ${text} (evidence: ${evidence})\n`);
@@ -1181,12 +1207,15 @@ function memoryCandidateExists(content, text, evidence) {
   return candidates.split('\n').some((line) => line.includes(`: ${text} (evidence: ${evidence})`));
 }
 
+function memoryCandidateTextExists(content, text) {
+  const key = normalizeMemoryCandidateText(text);
+  return parseMemoryCandidates(content).some((candidate) => normalizeMemoryCandidateText(candidate.text) === key);
+}
+
 function repeatedMemoryCandidateSuggestions(content, minCount) {
   const grouped = new Map();
-  const prunedTexts = prunedMemoryCandidateTexts(content);
-  for (const candidate of parseMemoryCandidates(content)) {
+  for (const candidate of activeMemoryCandidates(content)) {
     const key = normalizeMemoryCandidateText(candidate.text);
-    if (prunedTexts.has(key)) continue;
     const group = grouped.get(key) || { text: candidate.text, count: 0, evidence: [] };
     group.count += 1;
     group.evidence.push(candidate.evidence);
@@ -1203,6 +1232,11 @@ function repeatedMemoryCandidateSuggestions(content, minCount) {
     .sort((left, right) => right.count - left.count || left.text.localeCompare(right.text));
 }
 
+function activeMemoryCandidates(content) {
+  const prunedTexts = prunedMemoryCandidateTexts(content);
+  return parseMemoryCandidates(content).filter((candidate) => !prunedTexts.has(normalizeMemoryCandidateText(candidate.text)));
+}
+
 function parseMemoryCandidates(content) {
   return extractSection(content, 'Promotion Candidates')
     .split('\n')
@@ -1210,9 +1244,14 @@ function parseMemoryCandidates(content) {
     .map((line) => line.match(/^- \d{4}-\d{2}-\d{2}: (.+) \(evidence: (.+)\)$/))
     .filter(Boolean)
     .map((match) => ({
+      line: match[0],
       text: match[1],
       evidence: match[2],
     }));
+}
+
+function isPrunedMemoryText(content, text) {
+  return prunedMemoryCandidateTexts(content).has(normalizeMemoryCandidateText(text));
 }
 
 function prunedMemoryCandidateTexts(content) {
@@ -1225,7 +1264,7 @@ function prunedMemoryCandidateTexts(content) {
 }
 
 function normalizeMemoryCandidateText(text) {
-  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+  return normalizeSearchText(text);
 }
 
 function shellQuoteText(text) {
@@ -1540,10 +1579,11 @@ function initialUserMemory(user, timestamp) {
 }
 
 function normalizeState(state) {
-  if (!VALID_STATES.has(state)) {
+  const normalized = STATE_ALIASES[state] || String(state).replaceAll('_', '-');
+  if (!VALID_STATES.has(normalized)) {
     throw new Error(`Invalid state: ${state}. Valid states: ${[...VALID_STATES].join(', ')}`);
   }
-  return state;
+  return normalized;
 }
 
 function expandTargets(value, allowed) {
@@ -1704,14 +1744,14 @@ function markdownFilesRecursive(dir) {
 }
 
 function recallMatches(home, query, limit) {
-  const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))];
+  const termGroups = recallTermGroups(query);
   const results = [];
   for (const file of collectRecallSources(home)) {
     const content = fs.readFileSync(file, 'utf8');
     const lines = content.split('\n');
     lines.forEach((line, index) => {
-      const haystack = line.toLowerCase();
-      const score = terms.filter((term) => haystack.includes(term)).length;
+      const haystack = normalizeSearchText(line);
+      const score = termGroups.filter((terms) => terms.some((term) => haystack.includes(term))).length;
       if (score > 0) {
         results.push({
           file,
@@ -1724,6 +1764,32 @@ function recallMatches(home, query, limit) {
   }
   results.sort((left, right) => right.score - left.score || left.file.localeCompare(right.file) || left.line - right.line);
   return results.slice(0, limit);
+}
+
+function recallTermGroups(query) {
+  return normalizeSearchText(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((term) => new Set([term, ...recallTokenVariants(term), ...(RECALL_ALIASES[term] || [])]))
+    .map((terms) => [...terms].filter(Boolean))
+    .filter((terms, index, groups) => groups.findIndex((group) => group[0] === terms[0]) === index);
+}
+
+function recallTokenVariants(term) {
+  const variants = [];
+  if (term.endsWith('es') && term.length > 4) variants.push(term.slice(0, -2));
+  if (term.endsWith('s') && term.length > 3) variants.push(term.slice(0, -1));
+  return variants;
+}
+
+function normalizeSearchText(text) {
+  return String(text)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function userMemoryPath(home, userSlug) {
