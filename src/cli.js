@@ -1709,9 +1709,8 @@ function recallMatches(home, query, limit) {
       }
     });
   }
-  return results
-    .sort((left, right) => right.score - left.score || left.file.localeCompare(right.file) || left.line - right.line)
-    .slice(0, limit);
+  results.sort((left, right) => right.score - left.score || left.file.localeCompare(right.file) || left.line - right.line);
+  return results.slice(0, limit);
 }
 
 function userMemoryPath(home, userSlug) {
