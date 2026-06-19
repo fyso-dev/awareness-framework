@@ -1663,11 +1663,11 @@ function readMemoryEvents(home) {
 
 function collectRecallSources(home) {
   return [
-    longTermMemoryPath(home),
+    ...markdownFilesRecursive(path.join(home, 'memory')),
     memoryEventPath(home),
     ...markdownFiles(path.join(home, 'worklog')),
     ...markdownFiles(path.join(home, 'evaluations')),
-  ].filter((file) => fs.existsSync(file));
+  ].filter((file, index, files) => fs.existsSync(file) && files.indexOf(file) === index);
 }
 
 function markdownFiles(dir) {
@@ -1676,6 +1676,18 @@ function markdownFiles(dir) {
     .filter((name) => name.endsWith('.md'))
     .sort()
     .map((name) => path.join(dir, name));
+}
+
+function markdownFilesRecursive(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .flatMap((entry) => {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) return markdownFilesRecursive(file);
+      if (entry.isFile() && entry.name.endsWith('.md')) return [file];
+      return [];
+    });
 }
 
 function recallMatches(home, query, limit) {

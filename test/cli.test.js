@@ -333,6 +333,10 @@ test('recall searches memory, events, worklogs, and evaluations', () => {
     '--text', 'Always run recall-source memory coverage',
     '--evidence', 'recall-source plan',
   ], home);
+  fs.writeFileSync(path.join(home, 'memory', 'personality.md'), '- recall-source personality coverage\n');
+  fs.writeFileSync(path.join(home, 'memory', 'preferences.md'), '- recall-source preferences coverage\n');
+  fs.writeFileSync(path.join(home, 'memory', 'patterns.md'), '- recall-source patterns coverage\n');
+  fs.writeFileSync(path.join(home, 'memory', 'users', 'alice.md'), '- recall-source user coverage\n');
   run([
     'log',
     '--task', 'PROJECT-123',
@@ -347,11 +351,15 @@ test('recall searches memory, events, worklogs, and evaluations', () => {
 - recall-source evaluation coverage
 `);
 
-  const result = run(['recall', 'recall-source coverage'], home);
+  const result = run(['recall', 'recall-source coverage', '--limit', '20'], home);
 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Recall Results/);
   assert.match(result.stdout, /memory\/long-term\.md/);
+  assert.match(result.stdout, /memory\/personality\.md/);
+  assert.match(result.stdout, /memory\/preferences\.md/);
+  assert.match(result.stdout, /memory\/patterns\.md/);
+  assert.match(result.stdout, /memory\/users\/alice\.md/);
   assert.match(result.stdout, /memory\/events\.jsonl/);
   assert.match(result.stdout, /worklog\/2099-01-02\.md/);
   assert.match(result.stdout, /evaluations\/2099-01-02\.md/);
@@ -377,9 +385,12 @@ test('forget records a pruned memory without deleting history', () => {
   assert.match(result.stdout, /Memory pruned or revised/);
 
   const memory = fs.readFileSync(path.join(home, 'memory', 'long-term.md'), 'utf8');
+  const candidates = memory.split('## Pruned Or Revised')[0];
   assert.match(memory, /## Pruned Or Revised/);
   assert.match(memory, /Temporary memory to revise/);
   assert.match(memory, /Superseded by explicit user correction/);
+  assert.match(candidates, /Temporary memory to revise/);
+  assert.match(candidates, /Initial observation/);
 
   const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
     .trim()
