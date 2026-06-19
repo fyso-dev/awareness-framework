@@ -297,6 +297,30 @@ test('memory note and promote append auditable memory events', () => {
   assert.equal(events[1].text, 'Prefer local-first memory operations');
 });
 
+test('remember records a promotion candidate and event', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run([
+    'remember',
+    '--text', 'Prefer recall before repeating implementation work',
+    '--evidence', 'User asked for active memory operations',
+  ], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Remembered candidate/);
+
+  const memory = fs.readFileSync(path.join(home, 'memory', 'long-term.md'), 'utf8');
+  assert.match(memory, /Prefer recall before repeating implementation work/);
+
+  const [event] = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(event.type, 'memory.candidate.created');
+  assert.equal(event.source, 'remember');
+});
+
 test('memory review suggests repeated candidates as patterns', () => {
   const home = tempHome();
   run(['init'], home);

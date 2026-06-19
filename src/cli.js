@@ -455,7 +455,14 @@ function memoryPromotionSection(kind) {
 }
 
 function rememberCommand(ctx, opts) {
-  throw new Error('remember command is not implemented yet');
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const text = required(opts, 'text');
+  const evidence = required(opts, 'evidence');
+  const today = todayParts(ctx);
+  const added = appendMemoryCandidate(home, today, text, evidence, 'remember');
+  out(ctx, added ? `Remembered candidate: ${text}` : `Memory candidate already exists: ${text}`);
+  return 0;
 }
 
 function recallCommand(ctx, query, opts) {
