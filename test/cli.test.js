@@ -428,6 +428,24 @@ test('improve writes evaluation and surfaces repeated pattern suggestions', () =
   assert.equal(events.at(-1).type, 'pattern.suggested');
 });
 
+test('improve does not log evaluation created for existing evaluation', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const first = run(['improve'], home);
+  const second = run(['improve'], home);
+
+  assert.equal(first.code, 0);
+  assert.equal(second.code, 0);
+  assert.match(second.stdout, /Evaluation: already exists/);
+
+  const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(events.filter((event) => event.type === 'evaluation.created').length, 1);
+});
+
 test('improve rejects invalid min-count without writing evaluation or events', () => {
   const home = tempHome();
   run(['init'], home);
@@ -483,6 +501,36 @@ test('memory review suggests repeated candidates as patterns', () => {
   assert.equal(review.code, 0);
   assert.match(review.stdout, /Suggested pattern \(2 observations\): Improve task traceability/);
   assert.match(review.stdout, /awareness memory promote --kind pattern/);
+});
+
+test('memory review ignores pruned repeated candidates', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  run([
+    'memory',
+    'note',
+    '--text', 'Remove stale deployment shortcut',
+    '--evidence', 'worklog/2099-01-01.md',
+  ], home, { AWARENESS_NOW: '2099-01-01T12:34:00.000Z' });
+  run([
+    'memory',
+    'note',
+    '--text', 'Remove stale deployment shortcut',
+    '--evidence', 'worklog/2099-01-02.md',
+  ], home);
+  run([
+    'forget',
+    '--text', 'Remove stale deployment shortcut',
+    '--reason', 'Corrected by user',
+    '--evidence', 'PR review',
+  ], home);
+
+  const review = run(['memory', 'review'], home);
+
+  assert.equal(review.code, 0);
+  assert.match(review.stdout, /No repeated candidates/);
+  assert.doesNotMatch(review.stdout, /Remove stale deployment shortcut/);
 });
 
 test('help lists local memory operation commands', () => {

@@ -533,11 +533,13 @@ function improveCommand(ctx, opts) {
     evaluation = writeEvaluationIfMissing(home, today);
   }
 
-  appendMemoryEvent(home, today, {
-    type: 'evaluation.created',
-    file: evaluation.file,
-    status: evaluation.status,
-  });
+  if (evaluation.status === 'written' || evaluation.status === 'rewritten') {
+    appendMemoryEvent(home, today, {
+      type: 'evaluation.created',
+      file: evaluation.file,
+      status: evaluation.status,
+    });
+  }
 
   const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
   const suggestions = repeatedMemoryCandidateSuggestions(content, minCount);
@@ -1181,8 +1183,10 @@ function memoryCandidateExists(content, text, evidence) {
 
 function repeatedMemoryCandidateSuggestions(content, minCount) {
   const grouped = new Map();
+  const prunedTexts = prunedMemoryCandidateTexts(content);
   for (const candidate of parseMemoryCandidates(content)) {
     const key = normalizeMemoryCandidateText(candidate.text);
+    if (prunedTexts.has(key)) continue;
     const group = grouped.get(key) || { text: candidate.text, count: 0, evidence: [] };
     group.count += 1;
     group.evidence.push(candidate.evidence);
@@ -1209,6 +1213,15 @@ function parseMemoryCandidates(content) {
       text: match[1],
       evidence: match[2],
     }));
+}
+
+function prunedMemoryCandidateTexts(content) {
+  return new Set(extractSection(content, 'Pruned Or Revised')
+    .split('\n')
+    .map((line) => line.trim())
+    .map((line) => line.match(/^- \d{4}-\d{2}-\d{2}: (.+) \(reason: .+; evidence: .+\)$/))
+    .filter(Boolean)
+    .map((match) => normalizeMemoryCandidateText(match[1])));
 }
 
 function normalizeMemoryCandidateText(text) {
