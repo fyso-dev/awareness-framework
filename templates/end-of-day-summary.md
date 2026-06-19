@@ -25,3 +25,11 @@
 ## Methodology Observations
 
 - Anything that made the awareness or worklog process better or worse
+
+## Memory Review
+
+- New promotion candidates:
+- Repeated candidates or suggested patterns:
+- Promotions made:
+- Needs user confirmation:
+- Candidates to prune or leave short-term:

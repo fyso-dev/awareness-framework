@@ -225,6 +225,71 @@ test('evaluate can print without writing', () => {
   assert.equal(fs.existsSync(path.join(home, 'evaluations', '2099-01-02.md')), false);
 });
 
+test('evaluate writes promotion candidates for memory review', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['evaluate'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Memory candidates: 1 recorded/);
+  const memory = fs.readFileSync(path.join(home, 'memory', 'long-term.md'), 'utf8');
+  assert.match(memory, /## Promotion Candidates/);
+  assert.match(memory, /Review recurring awareness warning: Daily worklog has no entries/);
+});
+
+test('memory note and promote update long-term memory', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const note = run([
+    'memory',
+    'note',
+    '--text', 'User wants active memory review',
+    '--evidence', 'Direct request',
+  ], home);
+  const promote = run([
+    'memory',
+    'promote',
+    '--kind', 'preference',
+    '--text', 'Surface memory candidates proactively',
+    '--evidence', 'User requested more active memory',
+  ], home);
+  const candidates = run(['memory', 'candidates'], home);
+
+  assert.equal(note.code, 0);
+  assert.equal(promote.code, 0);
+  assert.equal(candidates.code, 0);
+  const memory = fs.readFileSync(path.join(home, 'memory', 'long-term.md'), 'utf8');
+  assert.match(candidates.stdout, /User wants active memory review/);
+  assert.match(memory, /## Preferences/);
+  assert.match(memory, /Surface memory candidates proactively/);
+});
+
+test('memory review suggests repeated candidates as patterns', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  run([
+    'memory',
+    'note',
+    '--text', 'Improve task traceability',
+    '--evidence', 'worklog/2099-01-01.md',
+  ], home, { AWARENESS_NOW: '2099-01-01T12:34:00.000Z' });
+  run([
+    'memory',
+    'note',
+    '--text', 'Improve task traceability',
+    '--evidence', 'worklog/2099-01-02.md',
+  ], home);
+
+  const review = run(['memory', 'review'], home);
+
+  assert.equal(review.code, 0);
+  assert.match(review.stdout, /Suggested pattern \(2 observations\): Improve task traceability/);
+  assert.match(review.stdout, /awareness memory promote --kind pattern/);
+});
+
 test('hook run records a low-noise runtime event', () => {
   const home = tempHome();
   run(['init'], home);
@@ -353,6 +418,9 @@ test('schedule install writes macOS LaunchAgents for hourly and daily maintenanc
   assert.match(daily, /<integer>86400<\/integer>/);
   assert.match(hourly, /--cadence/);
   assert.match(hourly, /hourly/);
+  assert.match(hourly, /<key>EnvironmentVariables<\/key>/);
+  assert.match(hourly, /<key>PATH<\/key>/);
+  assert.match(hourly, /\/usr\/local\/bin:\/opt\/homebrew\/bin/);
 });
 
 test('schedule install uses scoped LaunchAgent labels when channel is set', () => {

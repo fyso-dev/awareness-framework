@@ -42,6 +42,8 @@ export function runCli(argv, options = {}) {
         return handoffCommand(ctx, parsed.opts);
       case 'evaluate':
         return evaluateCommand(ctx, parsed.opts);
+      case 'memory':
+        return memoryCommand(ctx, subcommand, parsed.opts);
       case 'hook':
         return hookCommand(ctx, subcommand, parsed.opts);
       case 'schedule':
@@ -108,6 +110,10 @@ Usage:
   awareness log --task ID --summary TEXT --changes TEXT [--context TEXT] [--state STATE] [--evidence TEXT] [--next TEXT] [--home PATH]
   awareness handoff [--home PATH]
   awareness evaluate [--home PATH] [--force] [--print]
+  awareness memory candidates [--home PATH]
+  awareness memory review [--min-count N] [--home PATH]
+  awareness memory note --text TEXT [--evidence TEXT] [--home PATH]
+  awareness memory promote --kind preference|pattern|project|review --text TEXT --evidence TEXT [--home PATH]
   awareness hook run --event EVENT [--tool TOOL] [--quiet] [--home PATH]
   awareness hook install --tool codex|claude|opencode|all [--command CMD] [--home PATH] [--user-home PATH] [--config-home PATH] [--overwrite]
   awareness schedule run --cadence hourly|daily [--home PATH]
@@ -146,7 +152,7 @@ function initCommand(ctx, opts) {
   writeIfMissing(path.join(home, 'memory', 'personality.md'), readTemplate('personality.md'), created, existing);
   writeIfMissing(path.join(home, 'memory', 'preferences.md'), privateMemorySeed('Preferences'), created, existing);
   writeIfMissing(path.join(home, 'memory', 'patterns.md'), privateMemorySeed('Patterns'), created, existing);
-  writeIfMissing(path.join(home, 'memory', 'long-term.md'), readTemplate('memory-long-term.md'), created, existing);
+  writeIfMissing(longTermMemoryPath(home), readTemplate('memory-long-term.md'), created, existing);
 
   if (opts.wrappers) {
     writeWrappers({
@@ -335,8 +341,98 @@ function evaluateCommand(ctx, opts) {
 
   ensureDir(path.dirname(evaluationPath));
   fs.writeFileSync(evaluationPath, content);
+  const candidates = recordEvaluationMemoryCandidates(home, today);
   out(ctx, `Evaluation written: ${evaluationPath}`);
+  out(ctx, `Memory candidates: ${candidates.length ? `${candidates.length} recorded` : 'none'}`);
   return 0;
+}
+
+function memoryCommand(ctx, subcommand, opts) {
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+
+  switch (subcommand) {
+    case 'candidates':
+    case undefined:
+      return memoryCandidatesCommand(ctx, home);
+    case 'review':
+      return memoryReviewCommand(ctx, home, opts);
+    case 'note':
+      return memoryNoteCommand(ctx, home, opts);
+    case 'promote':
+      return memoryPromoteCommand(ctx, home, opts);
+    default:
+      err(ctx, `Unknown memory command: ${subcommand}`);
+      err(ctx, 'Use: candidates, review, note, or promote.');
+      return 1;
+  }
+}
+
+function memoryCandidatesCommand(ctx, home) {
+  const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
+  out(ctx, 'Promotion Candidates');
+  out(ctx, extractSection(content, 'Promotion Candidates').trim() || '- None yet.');
+  return 0;
+}
+
+function memoryReviewCommand(ctx, home, opts) {
+  const minCount = Number.parseInt(opts.minCount || '2', 10);
+  if (!Number.isInteger(minCount) || minCount < 2) {
+    throw new Error('Invalid --min-count. Use an integer >= 2.');
+  }
+
+  const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
+  const suggestions = repeatedMemoryCandidateSuggestions(content, minCount);
+  out(ctx, 'Memory Review');
+
+  if (!suggestions.length) {
+    out(ctx, `- No repeated candidates found with min-count ${minCount}.`);
+    return 0;
+  }
+
+  for (const suggestion of suggestions) {
+    out(ctx, `- Suggested pattern (${suggestion.count} observations): ${suggestion.text}`);
+    out(ctx, `  Evidence: ${suggestion.evidence}`);
+    out(ctx, `  Promote: awareness memory promote --kind pattern --text "${shellQuoteText(suggestion.text)}" --evidence "${shellQuoteText(suggestion.evidence)}"`);
+  }
+  return 0;
+}
+
+function memoryNoteCommand(ctx, home, opts) {
+  const text = required(opts, 'text');
+  const evidence = opts.evidence || 'Manual observation';
+  const today = todayParts(ctx);
+  const added = appendMemoryCandidate(home, today, text, evidence);
+  out(ctx, added ? `Memory candidate recorded: ${text}` : `Memory candidate already exists: ${text}`);
+  return 0;
+}
+
+function memoryPromoteCommand(ctx, home, opts) {
+  const kind = required(opts, 'kind');
+  const text = required(opts, 'text');
+  const evidence = required(opts, 'evidence');
+  const section = memoryPromotionSection(kind);
+  const today = todayParts(ctx);
+  const file = longTermMemoryPath(home);
+  let content = fs.readFileSync(file, 'utf8');
+  content = replaceMetadata(content, 'Updated', formatTimestamp(today));
+  content = appendToSection(content, section, `- ${today.date}: ${text} (evidence: ${evidence})\n`);
+  fs.writeFileSync(file, content);
+  out(ctx, `Memory promoted to ${section}: ${text}`);
+  return 0;
+}
+
+function memoryPromotionSection(kind) {
+  const sections = {
+    preference: 'Preferences',
+    pattern: 'Patterns',
+    project: 'Project Conventions',
+    review: 'Review Guidance',
+  };
+  if (!sections[kind]) {
+    throw new Error(`Invalid memory kind: ${kind}. Valid kinds: ${Object.keys(sections).join(', ')}`);
+  }
+  return sections[kind];
 }
 
 function personalityCommand(ctx, subcommand, opts) {
@@ -544,6 +640,7 @@ function scheduleRunCommand(ctx, opts) {
   out(ctx, `Schedule run complete: ${cadence}`);
   out(ctx, `Runtime log: ${eventFile}`);
   if (evaluation) out(ctx, `Evaluation: ${evaluation.status} (${evaluation.file})`);
+  if (evaluation?.candidates) out(ctx, `Memory candidates: ${evaluation.candidates.length ? `${evaluation.candidates.length} recorded` : 'none'}`);
   out(ctx, warnings.length ? `Warnings: ${warnings.length}` : 'Warnings: none');
   return 0;
 }
@@ -573,6 +670,7 @@ function scheduleInstallCommand(ctx, opts) {
       label,
       args,
       interval,
+      environmentPath: launchAgentPath(command),
       stdoutPath: path.join(launchdLogDir, `${target}.out.log`),
       stderrPath: path.join(launchdLogDir, `${target}.err.log`),
     }));
@@ -615,7 +713,8 @@ function writeEvaluationIfMissing(home, today) {
 
   ensureDir(path.dirname(evaluationPath));
   fs.writeFileSync(evaluationPath, buildEvaluation(home, today));
-  return { file: evaluationPath, status: 'written' };
+  const candidates = recordEvaluationMemoryCandidates(home, today);
+  return { file: evaluationPath, status: 'written', candidates };
 }
 
 function installCodexHooks(userHome, command, home) {
@@ -731,7 +830,16 @@ export const AwarenessFramework = async () => ({
 `;
 }
 
-function launchAgentPlist({ label, args, interval, stdoutPath, stderrPath }) {
+function launchAgentPath(command) {
+  const defaultPath = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  if (path.isAbsolute(command)) {
+    const commandDir = path.dirname(command);
+    return [commandDir, ...defaultPath.filter((dir) => dir !== commandDir)].join(':');
+  }
+  return defaultPath.join(':');
+}
+
+function launchAgentPlist({ label, args, interval, environmentPath, stdoutPath, stderrPath }) {
   const argItems = args.map((arg) => `    <string>${escapeXml(arg)}</string>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -739,6 +847,11 @@ function launchAgentPlist({ label, args, interval, stdoutPath, stderrPath }) {
 <dict>
   <key>Label</key>
   <string>${escapeXml(label)}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${escapeXml(environmentPath)}</string>
+  </dict>
   <key>ProgramArguments</key>
   <array>
 ${argItems}
@@ -845,7 +958,7 @@ function buildEvaluation(home, today) {
   const traceability = !entries.length ? 0 : assignedEntries / entries.length >= 0.8 ? 2 : 1;
   const handoff = /- Next:\s+(?!The next concrete action)\S+/.test(extractSection(current, 'Current Focus')) ? 2 : current ? 1 : 0;
   const noise = current.split('\n').length <= 180 && !/YYYY-MM-DD|branch-name/.test(current) ? 2 : 1;
-  const reporting = extractSection(current, 'End-of-Day Candidates').trim() ? 2 : entries.length ? 1 : 0;
+  const reporting = sectionHasMeaningfulContent(extractSection(current, 'End-of-Day Candidates')) ? 2 : entries.length ? 1 : 0;
 
   return `# Awareness Evaluation - ${today.date}
 
@@ -868,6 +981,118 @@ ${warnings.length ? warnings.map((warning) => `- ${warning}`).join('\n') : '- No
 - No framework change proposed automatically.
 - Review repeated warnings before proposing a methodology PR.
 `;
+}
+
+function recordEvaluationMemoryCandidates(home, today) {
+  const candidates = buildEvaluationMemoryCandidates(home, today);
+  return candidates.filter((candidate) => appendMemoryCandidate(home, today, candidate.text, candidate.evidence));
+}
+
+function buildEvaluationMemoryCandidates(home, today) {
+  const currentPath = awarenessPath(home);
+  const worklogPath = path.join(home, 'worklog', `${today.date}.md`);
+  const current = fs.existsSync(currentPath) ? fs.readFileSync(currentPath, 'utf8') : '';
+  const worklog = fs.existsSync(worklogPath) ? fs.readFileSync(worklogPath, 'utf8') : '';
+  const warnings = collectWarnings(home, today);
+  const entries = parseWorklogEntries(worklog);
+  const assignedEntries = entries.filter((entry) => entry.task && entry.task !== 'Unassigned').length;
+  const candidates = warnings.map((warning) => ({
+    text: `Review recurring awareness warning: ${warning}`,
+    evidence: `daily evaluation ${today.date}`,
+  }));
+
+  if (entries.length && assignedEntries / entries.length < 0.8) {
+    candidates.push({
+      text: `Improve task traceability: ${assignedEntries}/${entries.length} worklog entries had explicit task IDs.`,
+      evidence: `worklog/${today.date}.md`,
+    });
+  }
+
+  if (current && !/- Next:\s+(?!The next concrete action)\S+/.test(extractSection(current, 'Current Focus'))) {
+    candidates.push({
+      text: 'Tighten handoff habit: Current Focus should keep a concrete Next action before yielding control.',
+      evidence: awarenessPath(home),
+    });
+  }
+
+  if (current && (current.split('\n').length > 180 || /YYYY-MM-DD|branch-name/.test(current))) {
+    candidates.push({
+      text: 'Review awareness noise: current board is too long or still contains template placeholders.',
+      evidence: awarenessPath(home),
+    });
+  }
+
+  if (!sectionHasMeaningfulContent(extractSection(current, 'End-of-Day Candidates')) && entries.length) {
+    candidates.push({
+      text: 'Improve reporting readiness: capture end-of-day candidates while work is fresh.',
+      evidence: awarenessPath(home),
+    });
+  }
+
+  return candidates;
+}
+
+function appendMemoryCandidate(home, today, text, evidence) {
+  const file = longTermMemoryPath(home);
+  let content = fs.readFileSync(file, 'utf8');
+  if (memoryCandidateExists(content, text, evidence)) return false;
+
+  content = replaceMetadata(content, 'Updated', formatTimestamp(today));
+  content = appendToSection(content, 'Promotion Candidates', `- ${today.date}: ${text} (evidence: ${evidence})\n`);
+  fs.writeFileSync(file, content);
+  return true;
+}
+
+function memoryCandidateExists(content, text, evidence) {
+  const candidates = extractSection(content, 'Promotion Candidates');
+  return candidates.split('\n').some((line) => line.includes(`: ${text} (evidence: ${evidence})`));
+}
+
+function repeatedMemoryCandidateSuggestions(content, minCount) {
+  const grouped = new Map();
+  for (const candidate of parseMemoryCandidates(content)) {
+    const key = normalizeMemoryCandidateText(candidate.text);
+    const group = grouped.get(key) || { text: candidate.text, count: 0, evidence: [] };
+    group.count += 1;
+    group.evidence.push(candidate.evidence);
+    grouped.set(key, group);
+  }
+
+  return [...grouped.values()]
+    .filter((group) => group.count >= minCount)
+    .map((group) => ({
+      text: group.text,
+      count: group.count,
+      evidence: [...new Set(group.evidence)].join('; '),
+    }))
+    .sort((left, right) => right.count - left.count || left.text.localeCompare(right.text));
+}
+
+function parseMemoryCandidates(content) {
+  return extractSection(content, 'Promotion Candidates')
+    .split('\n')
+    .map((line) => line.trim())
+    .map((line) => line.match(/^- \d{4}-\d{2}-\d{2}: (.+) \(evidence: (.+)\)$/))
+    .filter(Boolean)
+    .map((match) => ({
+      text: match[1],
+      evidence: match[2],
+    }));
+}
+
+function normalizeMemoryCandidateText(text) {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function shellQuoteText(text) {
+  return text.replace(/["\\$`]/g, '\\$&');
+}
+
+function sectionHasMeaningfulContent(section) {
+  return section
+    .split('\n')
+    .map((line) => line.trim())
+    .some((line) => line && line !== '- None.' && line !== '- None yet.');
 }
 
 function appendWorklog(home, today, entry) {
@@ -955,7 +1180,7 @@ function ensurePrivateState(home, ctx) {
   if (!fs.existsSync(awarenessPath(home))) fs.writeFileSync(awarenessPath(home), initialAwareness(today));
   if (!fs.existsSync(path.join(home, 'worklog', `${today.date}.md`))) fs.writeFileSync(path.join(home, 'worklog', `${today.date}.md`), dailyWorklog(today.date));
   if (!fs.existsSync(personalityPath(home))) fs.writeFileSync(personalityPath(home), readTemplate('personality.md'));
-  if (!fs.existsSync(path.join(home, 'memory', 'long-term.md'))) fs.writeFileSync(path.join(home, 'memory', 'long-term.md'), readTemplate('memory-long-term.md'));
+  if (!fs.existsSync(longTermMemoryPath(home))) fs.writeFileSync(longTermMemoryPath(home), readTemplate('memory-long-term.md'));
 }
 
 function replaceSection(content, section, body) {
@@ -1275,6 +1500,10 @@ function awarenessPath(home) {
 
 function personalityPath(home) {
   return path.join(home, 'memory', 'personality.md');
+}
+
+function longTermMemoryPath(home) {
+  return path.join(home, 'memory', 'long-term.md');
 }
 
 function userMemoryPath(home, userSlug) {

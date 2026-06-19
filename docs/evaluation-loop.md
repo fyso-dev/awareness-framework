@@ -115,6 +115,8 @@ Each evaluation should end with one of these outcomes:
 - Propose framework PR.
 - Ask user for confirmation.
 
+Daily evaluation is active by default: when it writes an evaluation note, the CLI also records promotion candidates under `memory/long-term.md`. Candidates are intentionally reviewable. Use `awareness memory review` to surface repeated candidates as suggested `pattern` promotions, then promote them with `awareness memory promote` only after they are user-confirmed, repeated, or operationally important.
+
 ## Example Outcomes
 
 | Observation | Improvement |
