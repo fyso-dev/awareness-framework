@@ -353,6 +353,37 @@ test('recall searches memory, events, worklogs, and evaluations', () => {
   assert.match(result.stdout, /evaluations\/2099-01-02\.md/);
 });
 
+test('forget records a pruned memory without deleting history', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'remember',
+    '--text', 'Temporary memory to revise',
+    '--evidence', 'Initial observation',
+  ], home);
+
+  const result = run([
+    'forget',
+    '--text', 'Temporary memory to revise',
+    '--reason', 'Superseded by explicit user correction',
+    '--evidence', 'User correction',
+  ], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Memory pruned or revised/);
+
+  const memory = fs.readFileSync(path.join(home, 'memory', 'long-term.md'), 'utf8');
+  assert.match(memory, /## Pruned Or Revised/);
+  assert.match(memory, /Temporary memory to revise/);
+  assert.match(memory, /Superseded by explicit user correction/);
+
+  const events = fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(events.at(-1).type, 'memory.pruned');
+});
+
 test('recall dedupes repeated query terms when scoring', () => {
   const home = tempHome();
   run(['init'], home);

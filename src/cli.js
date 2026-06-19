@@ -491,7 +491,25 @@ function recallCommand(ctx, query, opts) {
 }
 
 function forgetCommand(ctx, opts) {
-  throw new Error('forget command is not implemented yet');
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const text = required(opts, 'text');
+  const reason = required(opts, 'reason');
+  const evidence = required(opts, 'evidence');
+  const today = todayParts(ctx);
+  const file = longTermMemoryPath(home);
+  let content = fs.readFileSync(file, 'utf8');
+  content = replaceMetadata(content, 'Updated', formatTimestamp(today));
+  content = appendToSection(content, 'Pruned Or Revised', `- ${today.date}: ${text} (reason: ${reason}; evidence: ${evidence})\n`);
+  fs.writeFileSync(file, content);
+  appendMemoryEvent(home, today, {
+    type: 'memory.pruned',
+    text,
+    reason,
+    evidence,
+  });
+  out(ctx, `Memory pruned or revised: ${text}`);
+  return 0;
 }
 
 function improveCommand(ctx, opts) {
