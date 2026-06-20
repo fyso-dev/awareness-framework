@@ -640,6 +640,74 @@ test('memory review ignores pruned repeated candidates', () => {
   assert.doesNotMatch(review.stdout, /Remove stale deployment shortcut/);
 });
 
+test('memory show displays curated long-term memory grouped by section', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  run([
+    'memory', 'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer unified worklog blocks',
+    '--evidence', 'worklog/2099-01-02.md',
+  ], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'pattern',
+    '--text', 'Promote only repeated candidates',
+    '--evidence', 'PR review',
+  ], home);
+
+  const show = run(['memory', 'show'], home);
+
+  assert.equal(show.code, 0);
+  assert.match(show.stdout, /## Preferences/);
+  assert.match(show.stdout, /Prefer unified worklog blocks/);
+  assert.match(show.stdout, /## Patterns/);
+  assert.match(show.stdout, /Promote only repeated candidates/);
+});
+
+test('memory show omits empty sections and candidates and pruned entries', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  run([
+    'memory', 'note',
+    '--text', 'Pending candidate not yet promoted',
+    '--evidence', 'worklog/2099-01-02.md',
+  ], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'preference',
+    '--text', 'A real durable preference',
+    '--evidence', 'worklog/2099-01-02.md',
+  ], home);
+  run([
+    'forget',
+    '--text', 'A stale rule',
+    '--reason', 'Corrected by user',
+    '--evidence', 'PR review',
+  ], home);
+
+  const show = run(['memory', 'show'], home);
+
+  assert.equal(show.code, 0);
+  assert.match(show.stdout, /A real durable preference/);
+  assert.doesNotMatch(show.stdout, /Pending candidate not yet promoted/);
+  assert.doesNotMatch(show.stdout, /A stale rule/);
+  assert.doesNotMatch(show.stdout, /## Patterns/);
+  assert.doesNotMatch(show.stdout, /None yet/);
+});
+
+test('memory show reports when no curated memory exists yet', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const show = run(['memory', 'show'], home);
+
+  assert.equal(show.code, 0);
+  assert.match(show.stdout, /No curated memory yet/);
+});
+
 test('help lists local memory operation commands', () => {
   let stdout = '';
   const code = runCli(['help'], {

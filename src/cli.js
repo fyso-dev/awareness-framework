@@ -130,6 +130,7 @@ Usage:
   awareness log --task ID --summary TEXT --changes TEXT [--context TEXT] [--state STATE] [--evidence TEXT] [--next TEXT] [--home PATH]
   awareness handoff [--home PATH]
   awareness evaluate [--home PATH] [--force] [--print]
+  awareness memory show [--home PATH]
   awareness memory candidates [--home PATH]
   awareness memory review [--min-count N] [--home PATH]
   awareness memory note --text TEXT [--evidence TEXT] [--home PATH]
@@ -385,13 +386,15 @@ function memoryCommand(ctx, subcommand, opts) {
       return memoryCandidatesCommand(ctx, home);
     case 'review':
       return memoryReviewCommand(ctx, home, opts);
+    case 'show':
+      return memoryShowCommand(ctx, home);
     case 'note':
       return memoryNoteCommand(ctx, home, opts);
     case 'promote':
       return memoryPromoteCommand(ctx, home, opts);
     default:
       err(ctx, `Unknown memory command: ${subcommand}`);
-      err(ctx, 'Use: candidates, review, note, or promote.');
+      err(ctx, 'Use: candidates, show, review, note, or promote.');
       return 1;
   }
 }
@@ -427,6 +430,37 @@ function memoryReviewCommand(ctx, home, opts) {
     out(ctx, `  Promote: awareness memory promote --kind pattern --text "${shellQuoteText(suggestion.text)}" --evidence "${shellQuoteText(suggestion.evidence)}"`);
   }
   return 0;
+}
+
+function memoryShowCommand(ctx, home) {
+  const content = fs.readFileSync(longTermMemoryPath(home), 'utf8');
+  const sections = ['Preferences', 'Patterns', 'Project Conventions', 'Review Guidance'];
+  out(ctx, 'Curated Memory');
+
+  let shown = 0;
+  for (const section of sections) {
+    const entries = curatedSectionEntries(content, section);
+    if (!entries.length) continue;
+    shown += 1;
+    out(ctx, '');
+    out(ctx, `## ${section}`);
+    for (const entry of entries) {
+      out(ctx, entry);
+    }
+  }
+
+  if (!shown) {
+    out(ctx, '- No curated memory yet.');
+  }
+  return 0;
+}
+
+function curatedSectionEntries(content, section) {
+  return extractSection(content, section)
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith('- '))
+    .filter((line) => line !== '- None yet.');
 }
 
 function memoryNoteCommand(ctx, home, opts) {

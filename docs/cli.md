@@ -196,12 +196,15 @@ When an evaluation is written, the CLI also records low-risk promotion candidate
 Reviews and promotes long-term memory.
 
 ```bash
+awareness memory show
 awareness memory candidates
 awareness memory review
 awareness memory review --min-count 3
 awareness memory note --text "User prefers active memory review" --evidence "Direct request"
 awareness memory promote --kind preference --text "Surface memory candidates proactively" --evidence "User confirmed"
 ```
+
+`memory show` prints the curated long-term memory (Preferences, Patterns, Project Conventions, Review Guidance) grouped by section. Empty sections, raw promotion candidates, and pruned or revised entries are omitted, so it is a quick read-only view of what is actually durable.
 
 `memory review` scans promotion candidates and suggests repeated candidates as `pattern` promotions once they appear at least twice by default.
 
