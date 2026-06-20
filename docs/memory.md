@@ -19,6 +19,7 @@ Do not load every layer into every prompt. Load the smallest layer that answers 
 Awareness uses a small local operation vocabulary:
 
 - `remember`: capture an evidence-backed candidate.
+- `memory show`: print the curated long-term memory (Preferences, Patterns, Project Conventions, Review Guidance) grouped by section, omitting empty sections, raw candidates, and pruned entries.
 - `recall`: search local memory, events, worklogs, and evaluations with deterministic normalized text matching.
 - `forget`: prune or revise stale memory without destructive deletion.
 - `improve`: run evaluation plus memory review to surface repeated candidates.
