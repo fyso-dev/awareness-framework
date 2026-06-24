@@ -30,6 +30,10 @@ export function renderStatsText(stats) {
     `- Pruned: ${stats.memory.pruned}`,
     `- Pattern suggestions: ${stats.memory.patternsSuggested}`,
     '',
+    'Private Templates',
+    `- Status: ${formatTemplateStatus(stats.privateTemplates)}`,
+    ...formatPendingTemplateFiles(stats.privateTemplates),
+    '',
     'Recall (hits)',
     `- Calls: ${stats.recall.calls}`,
     `- Avg results/call: ${stats.recall.avgResults.toFixed(1)}`,
@@ -60,6 +64,16 @@ function formatCounts(counts) {
 function formatRanked(ranked) {
   if (!ranked.length) return 'none';
   return ranked.map((entry) => `${entry.name} (${entry.count})`).join(', ');
+}
+
+function formatTemplateStatus(privateTemplates) {
+  if (!privateTemplates) return 'unknown';
+  return privateTemplates.status === 'up-to-date' ? 'up-to-date' : 'updates available';
+}
+
+function formatPendingTemplateFiles(privateTemplates) {
+  if (!privateTemplates?.pendingFiles?.length) return ['- Pending files: none'];
+  return privateTemplates.pendingFiles.map((entry) => `- ${entry.file}: ${entry.actions.join(', ')}`);
 }
 
 export function formatBytes(bytes) {
