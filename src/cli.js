@@ -10,7 +10,7 @@ import {
   memoryCandidateTextExists,
   repeatedMemoryCandidateSuggestions,
 } from './memory-candidates.js';
-import { normalizeSearchText, recallTermGroups } from './text.js';
+import { normalizeSearchText, recallTermGroups, trimEdgeChar } from './text.js';
 import { collectStats, isValidWindow } from './metrics.js';
 import { renderStatsJson, renderStatsText } from './stats.js';
 
@@ -1683,14 +1683,12 @@ function scopeLabel(ctx, opts) {
 }
 
 function safeScopeSlug(value, kind) {
-  const slug = String(value)
+  const normalized = String(value)
     .trim()
     .replace(/^#|^@/, '')
     .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '')
-    .slice(0, 96);
+    .replace(/[^a-z0-9._-]+/g, '-');
+  const slug = trimEdgeChar(normalized, '-').slice(0, 96);
   if (!slug) throw new Error(`Invalid ${kind} scope: ${value}`);
   return slug;
 }
