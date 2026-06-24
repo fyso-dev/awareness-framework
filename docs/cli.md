@@ -228,6 +228,32 @@ awareness improve
 `forget` records a prune/revision entry and appends `memory.pruned`; it does not destructively delete historical evidence, but pruned text is inactive for candidate review and promotion.
 `improve` runs the evaluation/review loop and appends `evaluation.created` and `pattern.suggested` events when applicable. Auto-generated evaluation candidates are deduplicated by text across days so recurring diagnostics do not flood human-curated candidates.
 
+`recall` also appends a usage event to `runtime/recall/YYYY-MM-DD.jsonl` (`source`, `query`, `terms`, `resultCount`, `topFiles`). These hits feed the recall metrics in `awareness stats`; queries with `resultCount: 0` highlight memory gaps.
+
+### `stats`
+
+Aggregates the events and state the CLI already records into a usage report. It is read-only over the local private state and never posts anywhere.
+
+```bash
+awareness stats                       # default window: last 7 days
+awareness stats --since today
+awareness stats --since 30d
+awareness stats --since all
+awareness stats --json                # machine-readable for dashboards/pipelines
+awareness stats --snapshot            # also append the aggregate to runtime/metrics/YYYY-MM-DD.jsonl
+```
+
+Reported metrics:
+
+- **Sessions & hooks** — sessions started, total hook events, compactions, and a per-tool breakdown (from `runtime/hooks`).
+- **Scheduled runs** — counts by cadence and the warnings trend (from `runtime/schedule`).
+- **Memory** — candidates created (by source), promotions (by kind), prunes, and pattern suggestions (from `memory/events.jsonl`).
+- **Recall (hits)** — calls, average results per call, zero-result queries, and the most frequent queries and matched files (from `runtime/recall`).
+- **Activity** — worklog entries, distinct tasks, and distinct repositories in the window (from `worklog/*.md`).
+- **Storage** — file count and bytes per area, computed on demand.
+
+`--snapshot` persists the full aggregate as one JSON line per run, giving a time series for growth charts without recomputing history. `--since` accepts `today`, `7d`, `30d`, or `all`; window filtering is by date so partial-day boundaries are inclusive of the whole day.
+
 ### `hook run`
 
 Records a lightweight lifecycle event from an agent CLI hook.
