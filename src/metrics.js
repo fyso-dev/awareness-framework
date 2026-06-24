@@ -14,14 +14,14 @@ const WINDOWS = {
 };
 
 export function isValidWindow(since) {
-  return Object.prototype.hasOwnProperty.call(WINDOWS, since);
+  return Object.hasOwn(WINDOWS, since);
 }
 
 export function windowBounds(referenceDate, since) {
   const to = dateString(referenceDate);
   if (since === 'all') return { since, from: null, to };
   const days = WINDOWS[since];
-  const start = new Date(referenceDate.getTime());
+  const start = new Date(referenceDate);
   start.setDate(start.getDate() - days);
   return { since, from: dateString(start), to };
 }

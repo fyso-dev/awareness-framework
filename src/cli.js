@@ -1154,8 +1154,8 @@ function collectWarnings(home, today) {
       .filter((block) => block.trim().startsWith('### '));
     for (const block of taskBlocks) {
       const title = block.split('\n')[0].replace(/^### /, '').trim();
-      if (!/- Next:\s*\n\s+-\s+\S+/.test(block) && !/- Next:\s+\S+/.test(block)) warnings.push(`Active task lacks Next: ${title}`);
-      if (!/- Evidence:\s*\n\s+-\s+\S+/.test(block) && !/- Evidence:\s+\S+/.test(block)) warnings.push(`Active task lacks Evidence: ${title}`);
+      if (!/- Next:[^\S\n]*\n\s+-\s+\S+/.test(block) && !/- Next:\s+\S+/.test(block)) warnings.push(`Active task lacks Next: ${title}`);
+      if (!/- Evidence:[^\S\n]*\n\s+-\s+\S+/.test(block) && !/- Evidence:\s+\S+/.test(block)) warnings.push(`Active task lacks Evidence: ${title}`);
     }
   }
 
@@ -1323,7 +1323,7 @@ function parseWorklogEntries(worklog) {
     return {
       block,
       task: headingTask || jiraTask || null,
-      hasEvidence: /- Evidence:\s+\S/.test(block) || /- Evidence:\s*\n\s+-\s+\S/.test(block),
+      hasEvidence: /- Evidence:\s+\S/.test(block) || /- Evidence:[^\S\n]*\n\s+-\s+\S/.test(block),
     };
   });
 }
@@ -1688,7 +1688,8 @@ function safeScopeSlug(value, kind) {
     .replace(/^#|^@/, '')
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '')
     .slice(0, 96);
   if (!slug) throw new Error(`Invalid ${kind} scope: ${value}`);
   return slug;

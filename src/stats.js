@@ -6,61 +6,53 @@ export function renderStatsJson(stats) {
 }
 
 export function renderStatsText(stats) {
-  const lines = [];
   const window = stats.window.from
     ? `${stats.window.from} -> ${stats.window.to}`
     : `all time (through ${stats.window.to})`;
-  lines.push(`Awareness Stats (${stats.window.since}: ${window})`);
 
-  lines.push('');
-  lines.push('Sessions & Hooks');
-  lines.push(`- Sessions started: ${stats.hooks.sessions}`);
-  lines.push(`- Hook events: ${stats.hooks.total}`);
-  lines.push(`- Compactions: ${stats.hooks.compactions}`);
-  lines.push(`- By tool: ${formatCounts(stats.hooks.byTool)}`);
-
-  lines.push('');
-  lines.push('Scheduled Runs');
-  lines.push(`- Total: ${stats.schedule.total}`);
-  lines.push(`- By cadence: ${formatCounts(stats.schedule.byCadence)}`);
-  lines.push(`- Warnings (latest/max over ${stats.warnings.samples} samples): ${stats.warnings.latest}/${stats.warnings.max}`);
-
-  lines.push('');
-  lines.push('Memory');
-  lines.push(`- Candidates created: ${stats.memory.candidatesCreated} (${formatCounts(stats.memory.candidatesBySource)})`);
-  lines.push(`- Promoted: ${stats.memory.promoted} (${formatCounts(stats.memory.promotedByKind)})`);
-  lines.push(`- Pruned: ${stats.memory.pruned}`);
-  lines.push(`- Pattern suggestions: ${stats.memory.patternsSuggested}`);
-
-  lines.push('');
-  lines.push('Recall (hits)');
-  lines.push(`- Calls: ${stats.recall.calls}`);
-  lines.push(`- Avg results/call: ${stats.recall.avgResults.toFixed(1)}`);
-  lines.push(`- Zero-result queries: ${stats.recall.zeroResultQueries}`);
-  lines.push(`- Top queries: ${formatRanked(stats.recall.topQueries)}`);
-  lines.push(`- Top files: ${formatRanked(stats.recall.topFiles)}`);
-
-  lines.push('');
-  lines.push('Activity');
-  lines.push(`- Worklog entries: ${stats.activity.worklogEntries} over ${stats.activity.days} day(s)`);
-  lines.push(`- Distinct tasks: ${stats.activity.distinctTasks}`);
-  lines.push(`- Distinct repos: ${stats.activity.distinctRepos}`);
-
-  lines.push('');
-  lines.push('Storage');
-  for (const entry of stats.storage.byArea) {
-    lines.push(`- ${entry.area}: ${entry.files} file(s), ${formatBytes(entry.bytes)}`);
-  }
-  lines.push(`- Total: ${stats.storage.totalFiles} file(s), ${formatBytes(stats.storage.totalBytes)}`);
-
-  return lines.join('\n');
+  return [
+    `Awareness Stats (${stats.window.since}: ${window})`,
+    '',
+    'Sessions & Hooks',
+    `- Sessions started: ${stats.hooks.sessions}`,
+    `- Hook events: ${stats.hooks.total}`,
+    `- Compactions: ${stats.hooks.compactions}`,
+    `- By tool: ${formatCounts(stats.hooks.byTool)}`,
+    '',
+    'Scheduled Runs',
+    `- Total: ${stats.schedule.total}`,
+    `- By cadence: ${formatCounts(stats.schedule.byCadence)}`,
+    `- Warnings (latest/max over ${stats.warnings.samples} samples): ${stats.warnings.latest}/${stats.warnings.max}`,
+    '',
+    'Memory',
+    `- Candidates created: ${stats.memory.candidatesCreated} (${formatCounts(stats.memory.candidatesBySource)})`,
+    `- Promoted: ${stats.memory.promoted} (${formatCounts(stats.memory.promotedByKind)})`,
+    `- Pruned: ${stats.memory.pruned}`,
+    `- Pattern suggestions: ${stats.memory.patternsSuggested}`,
+    '',
+    'Recall (hits)',
+    `- Calls: ${stats.recall.calls}`,
+    `- Avg results/call: ${stats.recall.avgResults.toFixed(1)}`,
+    `- Zero-result queries: ${stats.recall.zeroResultQueries}`,
+    `- Top queries: ${formatRanked(stats.recall.topQueries)}`,
+    `- Top files: ${formatRanked(stats.recall.topFiles)}`,
+    '',
+    'Activity',
+    `- Worklog entries: ${stats.activity.worklogEntries} over ${stats.activity.days} day(s)`,
+    `- Distinct tasks: ${stats.activity.distinctTasks}`,
+    `- Distinct repos: ${stats.activity.distinctRepos}`,
+    '',
+    'Storage',
+    ...stats.storage.byArea.map((entry) => `- ${entry.area}: ${entry.files} file(s), ${formatBytes(entry.bytes)}`),
+    `- Total: ${stats.storage.totalFiles} file(s), ${formatBytes(stats.storage.totalBytes)}`,
+  ].join('\n');
 }
 
 function formatCounts(counts) {
   const entries = Object.entries(counts);
   if (!entries.length) return 'none';
   return entries
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .toSorted((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
     .map(([name, count]) => `${name}=${count}`)
     .join(', ');
 }
