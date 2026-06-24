@@ -892,3 +892,63 @@ test('schedule install uses scoped LaunchAgent labels when channel is set', () =
   assert.match(plist, /dev\.fyso\.awareness\.support\.hourly/);
   assert.match(plist, /channels\/support/);
 });
+
+test('recall records a hit event with result count and top files', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run(['remember', '--text', 'Use the staging database for smoke tests', '--evidence', 'Team call'], home);
+
+  const result = run(['recall', 'staging database'], home);
+  assert.equal(result.code, 0);
+
+  const recallLog = path.join(home, 'runtime', 'recall', '2099-01-02.jsonl');
+  assert.equal(fs.existsSync(recallLog), true);
+  const event = JSON.parse(fs.readFileSync(recallLog, 'utf8').trim().split('\n').pop());
+  assert.equal(event.source, 'recall');
+  assert.equal(event.query, 'staging database');
+  assert.ok(event.resultCount >= 1);
+  assert.ok(Array.isArray(event.topFiles));
+});
+
+test('stats aggregates hooks, memory, recall, and storage', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run(['hook', 'run', '--tool', 'claude', '--event', 'session-start'], home);
+  run(['remember', '--text', 'Prefer ripgrep over grep', '--evidence', 'Repeated use'], home);
+  run(['recall', 'ripgrep'], home);
+  run(['recall', 'nonexistent-term-xyz'], home);
+
+  const result = run(['stats', '--since', 'all'], home);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Awareness Stats/);
+  assert.match(result.stdout, /Sessions started: 1/);
+  assert.match(result.stdout, /Calls: 2/);
+  assert.match(result.stdout, /Zero-result queries: 1/);
+  assert.match(result.stdout, /Storage/);
+});
+
+test('stats supports JSON output and snapshot persistence', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run(['recall', 'anything'], home);
+
+  const json = run(['stats', '--since', '7d', '--json', '--snapshot'], home);
+  assert.equal(json.code, 0);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.window.since, '7d');
+  assert.equal(parsed.recall.calls, 1);
+
+  const snapshotLog = path.join(home, 'runtime', 'metrics', '2099-01-02.jsonl');
+  assert.equal(fs.existsSync(snapshotLog), true);
+  const snapshot = JSON.parse(fs.readFileSync(snapshotLog, 'utf8').trim().split('\n').pop());
+  assert.equal(snapshot.source, 'stats.snapshot');
+  assert.equal(snapshot.stats.recall.calls, 1);
+});
+
+test('stats rejects an invalid window', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const result = run(['stats', '--since', 'yesterday'], home);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Invalid --since/);
+});

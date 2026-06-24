@@ -8,6 +8,16 @@ const RECALL_ALIASES = {
   usuarios: ['user', 'users'],
 };
 
+// Strip a leading/trailing run of `char` without an anchored regex quantifier
+// (avoids regex backtracking warnings). Pure and linear.
+export function trimEdgeChar(value, char) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === char) start += 1;
+  while (end > start && value[end - 1] === char) end -= 1;
+  return value.slice(start, end);
+}
+
 export function normalizeSearchText(text) {
   return String(text)
     .normalize('NFD')

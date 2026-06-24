@@ -10,7 +10,9 @@ import {
   memoryCandidateTextExists,
   repeatedMemoryCandidateSuggestions,
 } from './memory-candidates.js';
-import { normalizeSearchText, recallTermGroups } from './text.js';
+import { normalizeSearchText, recallTermGroups, trimEdgeChar } from './text.js';
+import { collectStats, isValidWindow } from './metrics.js';
+import { renderStatsJson, renderStatsText } from './stats.js';
 
 const VALID_STATES = new Set(['started', 'in-progress', 'paused', 'blocked', 'waiting', 'done', 'in-review', 'ready']);
 const DEFAULT_STATE = 'in-progress';
@@ -60,6 +62,8 @@ export function runCli(argv, options = {}) {
         return rememberCommand(ctx, parsed.opts);
       case 'recall':
         return recallCommand(ctx, [subcommand, ...positionRest].filter(Boolean).join(' '), parsed.opts);
+      case 'stats':
+        return statsCommand(ctx, parsed.opts);
       case 'forget':
         return forgetCommand(ctx, parsed.opts);
       case 'improve':
@@ -137,6 +141,7 @@ Usage:
   awareness memory promote --kind preference|pattern|project|review --text TEXT --evidence TEXT [--home PATH]
   awareness remember --text TEXT --evidence TEXT [--home PATH]
   awareness recall QUERY [--limit N] [--home PATH]
+  awareness stats [--since today|7d|30d|all] [--json] [--snapshot] [--home PATH]
   awareness forget --text TEXT --reason TEXT --evidence TEXT [--home PATH]
   awareness improve [--force] [--min-count N] [--home PATH]
   awareness hook run --event EVENT [--tool TOOL] [--quiet] [--home PATH]
@@ -534,6 +539,13 @@ function recallCommand(ctx, query, opts) {
   }
 
   const results = recallMatches(home, search, limit);
+  appendRuntimeEvent(home, todayParts(ctx), 'recall', {
+    source: 'recall',
+    query: String(search),
+    terms: recallTermGroups(String(search)).length,
+    resultCount: results.length,
+    topFiles: [...new Set(results.map((result) => displayPath(home, result.file)))].slice(0, 5),
+  });
   out(ctx, `Recall Results (${results.length})`);
   if (!results.length) {
     out(ctx, '- No matches.');
@@ -544,6 +556,30 @@ function recallCommand(ctx, query, opts) {
     out(ctx, `- ${displayPath(home, result.file)}:${result.line}: ${result.text}`);
   }
   return 0;
+}
+
+function statsCommand(ctx, opts) {
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const since = opts.since || '7d';
+  if (!isValidWindow(since)) {
+    throw new Error(`Invalid --since: ${since}. Valid windows: today, 7d, 30d, all`);
+  }
+
+  const stats = collectStats(home, referenceNow(ctx), since);
+
+  if (opts.snapshot) {
+    appendRuntimeEvent(home, todayParts(ctx), 'metrics', { source: 'stats.snapshot', since, stats });
+  }
+
+  out(ctx, opts.json ? renderStatsJson(stats) : renderStatsText(stats));
+  return 0;
+}
+
+function referenceNow(ctx) {
+  const now = ctx.env.AWARENESS_NOW ? new Date(ctx.env.AWARENESS_NOW) : new Date();
+  if (Number.isNaN(now.getTime())) throw new Error(`Invalid AWARENESS_NOW value: ${ctx.env.AWARENESS_NOW}`);
+  return now;
 }
 
 function forgetCommand(ctx, opts) {
@@ -1118,8 +1154,8 @@ function collectWarnings(home, today) {
       .filter((block) => block.trim().startsWith('### '));
     for (const block of taskBlocks) {
       const title = block.split('\n')[0].replace(/^### /, '').trim();
-      if (!/- Next:\s*\n\s+-\s+\S+/.test(block) && !/- Next:\s+\S+/.test(block)) warnings.push(`Active task lacks Next: ${title}`);
-      if (!/- Evidence:\s*\n\s+-\s+\S+/.test(block) && !/- Evidence:\s+\S+/.test(block)) warnings.push(`Active task lacks Evidence: ${title}`);
+      if (!/- Next:[^\S\n]*\n\s+-\s+\S+/.test(block) && !/- Next:\s+\S+/.test(block)) warnings.push(`Active task lacks Next: ${title}`);
+      if (!/- Evidence:[^\S\n]*\n\s+-\s+\S+/.test(block) && !/- Evidence:\s+\S+/.test(block)) warnings.push(`Active task lacks Evidence: ${title}`);
     }
   }
 
@@ -1287,7 +1323,7 @@ function parseWorklogEntries(worklog) {
     return {
       block,
       task: headingTask || jiraTask || null,
-      hasEvidence: /- Evidence:\s+\S/.test(block) || /- Evidence:\s*\n\s+-\s+\S/.test(block),
+      hasEvidence: /- Evidence:\s+\S/.test(block) || /- Evidence:[^\S\n]*\n\s+-\s+\S/.test(block),
     };
   });
 }
@@ -1647,13 +1683,12 @@ function scopeLabel(ctx, opts) {
 }
 
 function safeScopeSlug(value, kind) {
-  const slug = String(value)
+  const normalized = String(value)
     .trim()
     .replace(/^#|^@/, '')
     .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 96);
+    .replace(/[^a-z0-9._-]+/g, '-');
+  const slug = trimEdgeChar(normalized, '-').slice(0, 96);
   if (!slug) throw new Error(`Invalid ${kind} scope: ${value}`);
   return slug;
 }
