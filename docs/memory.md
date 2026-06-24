@@ -20,7 +20,7 @@ Awareness uses a small local operation vocabulary:
 
 - `remember`: capture an evidence-backed candidate.
 - `memory show`: print the curated long-term memory (Preferences, Patterns, Project Conventions, Review Guidance) grouped by section, omitting empty sections, raw candidates, and pruned entries.
-- `recall`: search local memory, events, worklogs, and evaluations with deterministic normalized text matching.
+- `recall`: search local memory, events, worklogs, and evaluations with a private in-memory MiniSearch index plus project-specific normalization and aliases.
 - `forget`: prune or revise stale memory without destructive deletion.
 - `improve`: run evaluation plus memory review to surface repeated candidates.
 
@@ -31,6 +31,21 @@ The append-only event log lives at:
 ```
 
 Markdown files remain the readable projection. The event log is the auditable history of memory operations.
+
+## Memory Effectiveness
+
+Memory should be reviewed for usefulness, not just growth.
+
+- **Store health** tracks whether the memory store is being maintained well: candidate-to-durable conversion, source mix, churn, density, and freshness.
+- **Utilization** tracks whether curated entries are actually recalled: activation rate, workhorse entries, dead weight, recall rate per session, and repeated zero-result queries.
+- **Outcome** tracks whether recalled entries helped: `memory.used` credits, useful-recall rate, and contradictions or stale signals around credited entries.
+- **Scorecard** compresses the above into a quick read on whether the memory store is healthy, used, and worth keeping.
+
+The `runtime/recall/YYYY-MM-DD.jsonl` log captures recall usage, including `curatedHits` when a recall matched curated long-term entries. Those keys make it possible to measure which entries were actually used over time.
+
+The `~/.agents/memory/events.jsonl` log captures `memory.used` events when an agent credits a curated entry that genuinely helped. That event records the curated key, the text, and an optional note.
+
+Repeated zero-result queries are the gap detector: if the same query keeps returning nothing, the memory store is missing something useful or the wording is off.
 
 ## Short-Term Memory
 

@@ -10,9 +10,16 @@ import {
   memoryCandidateTextExists,
   repeatedMemoryCandidateSuggestions,
 } from './memory-candidates.js';
-import { normalizeSearchText, recallTermGroups, trimEdgeChar } from './text.js';
+import { recallTermGroups, trimEdgeChar } from './text.js';
+import { searchDocuments } from './search.js';
 import { collectStats, isValidWindow } from './metrics.js';
 import { renderStatsJson, renderStatsText } from './stats.js';
+import {
+  collectMemoryMetrics,
+  curatedHitsForResults,
+  parseCuratedEntries,
+} from './memory-metrics.js';
+import { renderMemoryStatsJson, renderMemoryStatsText } from './memory-stats.js';
 
 const VALID_STATES = new Set(['started', 'in-progress', 'paused', 'blocked', 'waiting', 'done', 'in-review', 'ready']);
 const DEFAULT_STATE = 'in-progress';
@@ -139,6 +146,8 @@ Usage:
   awareness memory review [--min-count N] [--home PATH]
   awareness memory note --text TEXT [--evidence TEXT] [--home PATH]
   awareness memory promote --kind preference|pattern|project|review --text TEXT --evidence TEXT [--home PATH]
+  awareness memory used (--text TEXT | --key KEY) [--note TEXT] [--home PATH]
+  awareness memory stats [--since today|7d|30d|all] [--json] [--snapshot] [--home PATH]
   awareness remember --text TEXT --evidence TEXT [--home PATH]
   awareness recall QUERY [--limit N] [--home PATH]
   awareness stats [--since today|7d|30d|all] [--json] [--snapshot] [--home PATH]
@@ -397,9 +406,13 @@ function memoryCommand(ctx, subcommand, opts) {
       return memoryNoteCommand(ctx, home, opts);
     case 'promote':
       return memoryPromoteCommand(ctx, home, opts);
+    case 'used':
+      return memoryUsedCommand(ctx, home, opts);
+    case 'stats':
+      return memoryStatsCommand(ctx, home, opts);
     default:
       err(ctx, `Unknown memory command: ${subcommand}`);
-      err(ctx, 'Use: candidates, show, review, note, or promote.');
+      err(ctx, 'Use: candidates, show, review, note, promote, used, or stats.');
       return 1;
   }
 }
@@ -502,6 +515,66 @@ function memoryPromoteCommand(ctx, home, opts) {
   return 0;
 }
 
+function memoryUsedCommand(ctx, home, opts) {
+  const today = todayParts(ctx);
+  const entries = parseCuratedEntries(fs.readFileSync(longTermMemoryPath(home), 'utf8'));
+  let entry;
+
+  if (opts.key && opts.key !== true) {
+    entry = entries.find((candidate) => candidate.key === opts.key);
+    if (!entry) {
+      err(ctx, `No curated entry with key: ${opts.key}`);
+      return 1;
+    }
+  } else {
+    const query = required(opts, 'text');
+    const ranked = searchDocuments(entries.map((candidate) => ({
+      id: candidate.key,
+      text: candidate.text,
+      candidate,
+    })), query, entries.length);
+
+    if (!ranked.length) {
+      err(ctx, `No curated memory matches: ${query}`);
+      return 1;
+    }
+    if (ranked.length > 1 && ranked[0].score === ranked[1].score) {
+      err(ctx, `Ambiguous: multiple curated entries match "${query}" equally. Use --key.`);
+      for (const row of ranked.filter((candidate) => candidate.score === ranked[0].score)) {
+        err(ctx, `- [${row.candidate.key}] ${row.candidate.text}`);
+      }
+      return 1;
+    }
+    entry = ranked[0].candidate;
+  }
+
+  appendMemoryEvent(home, today, {
+    type: 'memory.used',
+    key: entry.key,
+    section: entry.section,
+    text: entry.text,
+    note: opts.note || '',
+  });
+  out(ctx, `Credited memory as used: ${entry.text}`);
+  return 0;
+}
+
+function memoryStatsCommand(ctx, home, opts) {
+  const since = opts.since || '7d';
+  if (!isValidWindow(since)) {
+    throw new Error(`Invalid --since: ${since}. Valid windows: today, 7d, 30d, all`);
+  }
+
+  const metrics = collectMemoryMetrics(home, referenceNow(ctx), since);
+
+  if (opts.snapshot) {
+    appendRuntimeEvent(home, todayParts(ctx), 'metrics', { source: 'memory.stats.snapshot', since, metrics });
+  }
+
+  out(ctx, opts.json ? renderMemoryStatsJson(metrics) : renderMemoryStatsText(metrics));
+  return 0;
+}
+
 function memoryPromotionSection(kind) {
   const sections = {
     preference: 'Preferences',
@@ -539,12 +612,15 @@ function recallCommand(ctx, query, opts) {
   }
 
   const results = recallMatches(home, search, limit);
+  const longTermPath = longTermMemoryPath(home);
+  const longTermContent = fs.existsSync(longTermPath) ? fs.readFileSync(longTermPath, 'utf8') : '';
   appendRuntimeEvent(home, todayParts(ctx), 'recall', {
     source: 'recall',
     query: String(search),
     terms: recallTermGroups(String(search)).length,
     resultCount: results.length,
     topFiles: [...new Set(results.map((result) => displayPath(home, result.file)))].slice(0, 5),
+    curatedHits: curatedHitsForResults(longTermContent, results, longTermPath),
   });
   out(ctx, `Recall Results (${results.length})`);
   if (!results.length) {
@@ -1765,26 +1841,20 @@ function markdownFilesRecursive(dir) {
 }
 
 function recallMatches(home, query, limit) {
-  const termGroups = recallTermGroups(query);
-  const results = [];
+  const documents = [];
   for (const file of collectRecallSources(home)) {
-    const content = fs.readFileSync(file, 'utf8');
-    const lines = content.split('\n');
-    lines.forEach((line, index) => {
-      const haystack = normalizeSearchText(line);
-      const score = termGroups.filter((terms) => terms.some((term) => haystack.includes(term))).length;
-      if (score > 0) {
-        results.push({
-          file,
-          line: index + 1,
-          score,
-          text: line.trim(),
-        });
-      }
+    fs.readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
+      const text = line.trim();
+      if (!text) return;
+      documents.push({
+        id: `${file}:${index + 1}`,
+        file,
+        line: index + 1,
+        text,
+      });
     });
   }
-  results.sort((left, right) => right.score - left.score || left.file.localeCompare(right.file) || left.line - right.line);
-  return results.slice(0, limit);
+  return searchDocuments(documents, query, limit);
 }
 
 function userMemoryPath(home, userSlug) {

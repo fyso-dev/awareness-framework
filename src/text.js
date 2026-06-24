@@ -6,6 +6,16 @@ const RECALL_ALIASES = {
   users: ['usuario', 'usuarios'],
   usuario: ['user', 'users'],
   usuarios: ['user', 'users'],
+  repo: ['repository', 'repositorio'],
+  repository: ['repo', 'repositorio'],
+  repositorio: ['repo', 'repository'],
+  config: ['configuration', 'configuracion'],
+  configuration: ['config', 'configuracion'],
+  configuracion: ['config', 'configuration'],
+  db: ['database'],
+  database: ['db'],
+  release: ['publish', 'version'],
+  publish: ['release'],
 };
 
 // Strip a leading/trailing run of `char` without an anchored regex quantifier
@@ -37,9 +47,23 @@ export function recallTermGroups(query) {
     .filter((terms, index, groups) => groups.findIndex((group) => group[0] === terms[0]) === index);
 }
 
+export function expandSearchQuery(query) {
+  const groups = recallTermGroups(query);
+  if (!groups.length) return [];
+  const original = normalizeSearchText(query);
+  const expanded = [original, groups.map((terms) => terms.join(' ')).join(' ')];
+  for (const group of groups) {
+    for (const term of group) expanded.push(term);
+  }
+  return [...new Set(expanded.filter(Boolean))];
+}
+
 function recallTokenVariants(term) {
   const variants = [];
   if (term.endsWith('es') && term.length > 4) variants.push(term.slice(0, -2));
   if (term.endsWith('s') && term.length > 3) variants.push(term.slice(0, -1));
-  return variants;
+  if (term.endsWith('ing') && term.length > 5) variants.push(term.slice(0, -3));
+  if (term.endsWith('ed') && term.length > 4) variants.push(term.slice(0, -2));
+  if (term.endsWith('mente') && term.length > 7) variants.push(term.slice(0, -5));
+  return variants.filter((variant) => variant.length >= 3);
 }

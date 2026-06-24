@@ -54,6 +54,7 @@ Personality is treated as a private operating profile: continuity, voice, contex
   runtime/
     hooks/
     schedule/
+    metrics/
   channels/
     <channel>/
       awareness/
@@ -110,7 +111,10 @@ awareness hook install --tool all --command "$(command -v awareness)"
 awareness schedule install --cadence all --command "$(command -v awareness)"
 awareness remember --text "Useful local observation" --evidence "Source"
 awareness recall "local observation"
+awareness memory stats --since 7d
 awareness improve
 ```
+
+`memory/events.jsonl` stores the local memory event history, including `memory.used` credits. `runtime/recall/*.jsonl` keeps recall usage and curated hit attribution.
 
 The CLI only reads and writes private local files. It does not post to Jira, GitHub, or any external system.

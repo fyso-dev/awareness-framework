@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { runCli } from '../src/cli.js';
+import { collectMemoryMetrics, entryKey, parseCuratedEntries } from '../src/memory-metrics.js';
+import { searchDocuments } from '../src/search.js';
 
 function run(argv, home, env = {}) {
   let stdout = '';
@@ -583,7 +585,11 @@ test('recall dedupes repeated query terms when scoring', () => {
   const result = run(['recall', 'memory-only memory-only dedupe-eval', '--limit', '1'], home);
 
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /evaluations\/2099-01-02\.md/);
+  assert.match(result.stdout, /Recall Results \(1\)/);
+  const event = JSON.parse(
+    fs.readFileSync(path.join(home, 'runtime', 'recall', '2099-01-02.jsonl'), 'utf8').trim().split('\n').pop(),
+  );
+  assert.equal(event.terms, 2);
 });
 
 test('memory review suggests repeated candidates as patterns', () => {
@@ -738,6 +744,201 @@ test('documentation mentions local memory operations', () => {
   assert.match(cliDocs, /awareness improve/);
   assert.match(memoryDocs, /memory\/events\.jsonl/);
   assert.match(agentTemplate, /awareness recall/);
+});
+
+test('parseCuratedEntries extracts curated entries with stable keys', () => {
+  const content = [
+    '# Long-Term Memory', '',
+    '## Preferences', '',
+    '- 2026-06-19: Prefer ripgrep over grep (evidence: repeated use)',
+    '',
+    '## Patterns', '',
+    '- None yet.',
+    '',
+    '## Project Conventions', '',
+    '- 2026-06-20: Keep src/cli.js thin (evidence: PR #11)',
+    '',
+  ].join('\n');
+
+  const entries = parseCuratedEntries(content);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].section, 'Preferences');
+  assert.match(entries[0].text, /Prefer ripgrep over grep/);
+  assert.equal(entries[0].key, entryKey('Prefer ripgrep over grep'));
+  assert.ok(!entries.some((entry) => entry.text.includes('None yet')));
+  assert.equal(entryKey('Keep   SRC/cli.js  thin'), entryKey('keep src/cli.js thin'));
+});
+
+test('searchDocuments uses MiniSearch with aliases, fuzzy matching, and phrase boost', () => {
+  assert.ok(searchDocuments([{ id: 'repo', text: 'sync the repo nightly' }], 'repository', 10).length > 0);
+  assert.ok(searchDocuments([{ id: 'test', text: 'run the test suite' }], 'testing flow', 10).length > 0);
+  assert.ok(searchDocuments([{ id: 'typo', text: 'Prefer ripgrep over grep' }], 'ripgre', 10).length > 0);
+
+  const results = searchDocuments([
+    { id: 'adjacent', text: 'document the release process here' },
+    { id: 'scattered', text: 'release notes mention the build process' },
+  ], 'release process', 2);
+  assert.equal(results[0].id, 'adjacent');
+});
+
+test('recall finds entries via synonym expansion', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run(['remember', '--text', 'Sync the repo nightly', '--evidence', 'e'], home);
+
+  const result = run(['recall', 'repository'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Sync the repo nightly/);
+});
+
+test('recall attributes hits to curated long-term entries', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer ripgrep over grep for searches',
+    '--evidence', 'User request',
+  ], home);
+
+  const result = run(['recall', 'ripgrep'], home);
+  assert.equal(result.code, 0);
+
+  const event = JSON.parse(
+    fs.readFileSync(path.join(home, 'runtime', 'recall', '2099-01-02.jsonl'), 'utf8').trim().split('\n').pop(),
+  );
+  assert.ok(Array.isArray(event.curatedHits));
+  assert.ok(event.curatedHits.length >= 1);
+});
+
+test('memory used credits a curated entry with a memory.used event', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer ripgrep over grep for searches',
+    '--evidence', 'User request',
+  ], home);
+
+  const result = run([
+    'memory', 'used',
+    '--text', 'ripgrep over grep',
+    '--note', 'Used it to pick the search tool',
+  ], home);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Credited memory as used/);
+
+  const event = JSON.parse(
+    fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8').trim().split('\n').pop(),
+  );
+  assert.equal(event.type, 'memory.used');
+  assert.match(event.text, /Prefer ripgrep over grep/);
+  assert.ok(event.key);
+});
+
+test('memory used accepts an exact --key override', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer ripgrep over grep for searches',
+    '--evidence', 'e',
+  ], home);
+  const key = entryKey('Prefer ripgrep over grep for searches');
+
+  const result = run(['memory', 'used', '--key', key], home);
+  assert.equal(result.code, 0);
+  const event = JSON.parse(
+    fs.readFileSync(path.join(home, 'memory', 'events.jsonl'), 'utf8').trim().split('\n').pop(),
+  );
+  assert.equal(event.key, key);
+});
+
+test('memory used reports when no curated entry matches', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['memory', 'used', '--text', 'nonexistent-topic-zzz'], home);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /No curated memory matches/);
+});
+
+test('collectMemoryMetrics computes funnel, activation, and scorecard', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run(['remember', '--text', 'Prefer ripgrep over grep', '--evidence', 'e'], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer ripgrep over grep',
+    '--evidence', 'User request',
+  ], home);
+  run(['recall', 'ripgrep'], home);
+  run(['recall', 'kubernetes-thing'], home);
+  run(['recall', 'kubernetes-thing'], home);
+  run(['memory', 'used', '--text', 'ripgrep', '--note', 'helped'], home);
+
+  const metrics = collectMemoryMetrics(home, new Date('2099-01-02T12:34:00.000Z'), 'all');
+
+  assert.equal(metrics.store.candidatesCreated >= 1, true);
+  assert.equal(metrics.store.promoted >= 1, true);
+  assert.equal(metrics.utilization.curatedTotal >= 1, true);
+  assert.ok(metrics.utilization.activationRate > 0);
+  assert.equal(metrics.coverage.repeatedZeroResultQueries.length >= 1, true);
+  assert.ok(metrics.outcome.usefulRecallRate > 0);
+  assert.equal(typeof metrics.scorecard.total, 'number');
+  assert.equal(metrics.scorecard.dimensions.length, 5);
+});
+
+test('memory stats renders a scorecard and supports json + snapshot', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer ripgrep over grep',
+    '--evidence', 'e',
+  ], home);
+  run(['recall', 'ripgrep'], home);
+
+  const text = run(['memory', 'stats', '--since', 'all'], home);
+  assert.equal(text.code, 0);
+  assert.match(text.stdout, /Memory Efficiency/);
+  assert.match(text.stdout, /Activation/);
+  assert.match(text.stdout, /Scorecard/);
+  assert.match(text.stdout, /0 contradiction\(s\)/);
+
+  const json = run(['memory', 'stats', '--since', '7d', '--json', '--snapshot'], home);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(typeof parsed.scorecard.total, 'number');
+  const snapshot = path.join(home, 'runtime', 'metrics', '2099-01-02.jsonl');
+  assert.equal(fs.existsSync(snapshot), true);
+  assert.match(fs.readFileSync(snapshot, 'utf8'), /memory\.stats\.snapshot/);
+});
+
+test('memory stats rejects an invalid window', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['memory', 'stats', '--since', 'eternity'], home);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Invalid --since/);
+});
+
+test('documentation mentions memory effectiveness metrics', () => {
+  const cliDocs = fs.readFileSync(path.join(repoRootForTests(), 'docs', 'cli.md'), 'utf8');
+  const memoryDocs = fs.readFileSync(path.join(repoRootForTests(), 'docs', 'memory.md'), 'utf8');
+  const agentTemplate = fs.readFileSync(path.join(repoRootForTests(), 'templates', 'agent-instructions.md'), 'utf8');
+
+  assert.match(cliDocs, /awareness memory stats/);
+  assert.match(cliDocs, /awareness memory used/);
+  assert.match(memoryDocs, /Memory Efficiency|activation rate/i);
+  assert.match(agentTemplate, /awareness memory used/);
 });
 
 test('hook run records a low-noise runtime event', () => {
