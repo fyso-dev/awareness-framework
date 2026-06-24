@@ -116,6 +116,17 @@ awareness init --wrappers \
   --config-home /path/to/config-home
 ```
 
+### `update`
+
+Applies non-destructive template additions to existing private state.
+
+```bash
+awareness update --dry-run
+awareness update
+```
+
+Use this after upgrading the CLI when templates gained new guidance, or run `awareness init` again for the same non-destructive reconciliation. It preserves current focus, worklogs, durable memory, candidates, and event history. It only adds known missing sections or lines, such as new memory effectiveness guidance in `AGENTS.md` and `memory/long-term.md`.
+
 ### `status`
 
 Shows the current focus and warnings. Warnings are printed but do not make the command fail; use `awareness check --strict` when automation should fail on warnings.

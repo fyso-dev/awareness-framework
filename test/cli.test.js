@@ -65,6 +65,125 @@ test('init can create regular wrapper files without overwriting existing files',
   assert.match(fs.readFileSync(codexWrapper, 'utf8'), /@.+AGENTS\.md/);
 });
 
+test('update previews and applies private state template additions without overwriting memory', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const protocol = path.join(home, 'AGENTS.md');
+  const longTerm = path.join(home, 'memory', 'long-term.md');
+  fs.writeFileSync(protocol, '# Custom Protocol\n\nKeep my local instruction.\n');
+  fs.writeFileSync(longTerm, `# Long-Term Memory
+
+- Updated: never
+- Scope: Local private state; do not commit
+
+## Preferences
+
+- 2099-01-01: Keep existing durable memory (evidence: test)
+`);
+
+  const preview = run(['update', '--dry-run'], home);
+  assert.equal(preview.code, 0);
+  assert.match(preview.stdout, /Would update/);
+  assert.doesNotMatch(fs.readFileSync(protocol, 'utf8'), /awareness memory stats/);
+
+  const applied = run(['update'], home);
+  assert.equal(applied.code, 0);
+  assert.match(applied.stdout, /Updated:/);
+
+  const updatedProtocol = fs.readFileSync(protocol, 'utf8');
+  const updatedLongTerm = fs.readFileSync(longTerm, 'utf8');
+  assert.match(updatedProtocol, /Keep my local instruction/);
+  assert.match(updatedProtocol, /awareness memory stats/);
+  assert.match(updatedLongTerm, /Keep existing durable memory/);
+  assert.match(updatedLongTerm, /## Review Notes/);
+  assert.match(updatedLongTerm, /awareness memory used/);
+
+  const again = run(['update'], home);
+  assert.equal(again.code, 0);
+  assert.match(again.stdout, /Updated: none/);
+});
+
+test('update dry-run does not create missing private state files', () => {
+  const home = tempHome();
+
+  const preview = run(['update', '--dry-run'], home);
+
+  assert.equal(preview.code, 0);
+  assert.match(preview.stdout, /Would update/);
+  assert.match(preview.stdout, /would create missing private file/);
+  assert.equal(fs.existsSync(path.join(home, 'AGENTS.md')), false);
+  assert.equal(fs.existsSync(path.join(home, 'awareness', 'current.md')), false);
+  assert.equal(fs.existsSync(path.join(home, 'memory', 'long-term.md')), false);
+});
+
+test('update adds protocol block even when command names already exist elsewhere', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const protocol = path.join(home, 'AGENTS.md');
+  fs.writeFileSync(protocol, [
+    '# Agent Instructions',
+    '',
+    'Existing rules mention `awareness memory used` and `awareness memory stats` inline.',
+    '',
+  ].join('\n'));
+
+  const result = run(['update'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(fs.readFileSync(protocol, 'utf8'), /## Memory Effectiveness Commands/);
+});
+
+test('update appends guidance into blank consecutive sections', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const longTerm = path.join(home, 'memory', 'long-term.md');
+  fs.writeFileSync(longTerm, `# Long-Term Memory
+
+## Review Notes
+
+## Event Log
+
+## Guardrails
+`);
+
+  const result = run(['update'], home);
+
+  assert.equal(result.code, 0);
+  const updated = fs.readFileSync(longTerm, 'utf8');
+  const reviewNotesIndex = updated.indexOf('Use `awareness memory candidates`');
+  const eventHeadingIndex = updated.indexOf('## Event Log');
+  const eventLogIndex = updated.indexOf('Append-only audit history');
+  const guardrailsHeadingIndex = updated.indexOf('## Guardrails');
+  const guardrailIndex = updated.indexOf('Do not store secrets');
+  assert.equal(reviewNotesIndex > updated.indexOf('## Review Notes'), true);
+  assert.equal(reviewNotesIndex < eventHeadingIndex, true);
+  assert.equal(eventLogIndex > eventHeadingIndex, true);
+  assert.equal(eventLogIndex < guardrailsHeadingIndex, true);
+  assert.equal(guardrailIndex > guardrailsHeadingIndex, true);
+});
+
+test('init auto-updates existing private state templates without overwriting memory', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const protocol = path.join(home, 'AGENTS.md');
+  const longTerm = path.join(home, 'memory', 'long-term.md');
+  fs.writeFileSync(protocol, '# Existing Protocol\n\nKeep local protocol.\n');
+  fs.writeFileSync(longTerm, `# Long-Term Memory
+
+## Preferences
+
+- 2099-01-01: Keep existing durable memory (evidence: test)
+`);
+
+  const result = run(['init'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Template updates:/);
+  assert.match(fs.readFileSync(protocol, 'utf8'), /awareness memory stats/);
+  assert.match(fs.readFileSync(longTerm, 'utf8'), /Keep existing durable memory/);
+  assert.match(fs.readFileSync(longTerm, 'utf8'), /## Review Notes/);
+});
+
 test('channel scope stores private files under a channel-specific folder', () => {
   const home = tempHome();
 
@@ -727,6 +846,7 @@ test('help lists local memory operation commands', () => {
 
   assert.equal(code, 0);
   assert.match(stdout, /awareness remember --text TEXT --evidence TEXT/);
+  assert.match(stdout, /awareness update \[--dry-run\]/);
   assert.match(stdout, /awareness recall QUERY/);
   assert.match(stdout, /awareness forget --text TEXT --reason TEXT --evidence TEXT/);
   assert.match(stdout, /awareness improve/);
@@ -739,6 +859,7 @@ test('documentation mentions local memory operations', () => {
   const agentTemplate = fs.readFileSync(path.join(repoRootForTests(), 'templates', 'agent-instructions.md'), 'utf8');
 
   assert.match(cliDocs, /awareness remember/);
+  assert.match(cliDocs, /awareness update/);
   assert.match(cliDocs, /awareness recall/);
   assert.match(cliDocs, /awareness forget/);
   assert.match(cliDocs, /awareness improve/);
