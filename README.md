@@ -104,6 +104,7 @@ Personality is treated as a private operating profile: continuity, voice, contex
 npm install -g @fyso/awareness-framework
 awareness init
 awareness init --wrappers
+awareness update
 awareness status
 awareness refresh
 awareness check

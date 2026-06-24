@@ -49,6 +49,8 @@ export function runCli(argv, options = {}) {
     switch (command) {
       case 'init':
         return initCommand(ctx, parsed.opts);
+      case 'update':
+        return updateCommand(ctx, parsed.opts);
       case 'status':
         return statusCommand(ctx, parsed.opts);
       case 'refresh':
@@ -134,6 +136,7 @@ function printHelp(ctx) {
 Usage:
   awareness init [--home PATH]
   awareness init --wrappers [--home PATH] [--user-home PATH] [--config-home PATH] [--overwrite-wrappers]
+  awareness update [--dry-run] [--home PATH]
   awareness status [--home PATH]
   awareness refresh [--home PATH]
   awareness check [--home PATH] [--strict]
@@ -195,6 +198,7 @@ function initCommand(ctx, opts) {
   writeIfMissing(path.join(home, 'memory', 'preferences.md'), privateMemorySeed('Preferences'), created, existing);
   writeIfMissing(path.join(home, 'memory', 'patterns.md'), privateMemorySeed('Patterns'), created, existing);
   writeIfMissing(longTermMemoryPath(home), readTemplate('memory-long-term.md'), created, existing);
+  const updates = privateStateTemplateUpdates(home, false);
 
   if (opts.wrappers) {
     writeWrappers({
@@ -211,9 +215,29 @@ function initCommand(ctx, opts) {
   out(ctx, `Initialized awareness home: ${home}`);
   out(ctx, `Created: ${created.length ? created.map((file) => displayPath(home, file)).join(', ') : 'none'}`);
   out(ctx, `Existing: ${existing.length ? existing.map((file) => displayPath(home, file)).join(', ') : 'none'}`);
+  out(ctx, `Template updates: ${updates.length ? updates.map((change) => displayPath(home, change.file)).join(', ') : 'none'}`);
   if (opts.wrappers) {
     out(ctx, `Wrappers: ${wrapperSummary({ userHome, configHome })}`);
     out(ctx, `Overwritten: ${overwritten.length ? overwritten.join(', ') : 'none'}`);
+  }
+  return 0;
+}
+
+function updateCommand(ctx, opts) {
+  const home = agentsHome(ctx, opts);
+  ensurePrivateState(home, ctx);
+  const dryRun = Boolean(opts.dryRun);
+  const changes = privateStateTemplateUpdates(home, dryRun);
+
+  out(ctx, `Awareness home: ${home}`);
+  if (!changes.length) {
+    out(ctx, 'Updated: none');
+    return 0;
+  }
+
+  out(ctx, dryRun ? 'Would update:' : 'Updated:');
+  for (const change of changes) {
+    out(ctx, `- ${displayPath(home, change.file)}: ${change.actions.join(', ')}`);
   }
   return 0;
 }
@@ -1451,6 +1475,88 @@ function ensurePrivateState(home, ctx) {
   if (!fs.existsSync(path.join(home, 'worklog', `${today.date}.md`))) fs.writeFileSync(path.join(home, 'worklog', `${today.date}.md`), dailyWorklog(today.date));
   if (!fs.existsSync(personalityPath(home))) fs.writeFileSync(personalityPath(home), readTemplate('personality.md'));
   if (!fs.existsSync(longTermMemoryPath(home))) fs.writeFileSync(longTermMemoryPath(home), readTemplate('memory-long-term.md'));
+}
+
+function privateStateTemplateUpdates(home, dryRun) {
+  return [
+    updateProtocolFile(path.join(home, 'AGENTS.md'), dryRun),
+    updateLongTermMemoryFile(longTermMemoryPath(home), dryRun),
+  ].filter((change) => change.actions.length);
+}
+
+function updateProtocolFile(file, dryRun) {
+  let content = fs.readFileSync(file, 'utf8');
+  const original = content;
+  const actions = [];
+
+  content = appendUniqueBlock(content, [
+    'awareness memory used',
+    'awareness memory stats',
+  ], [
+    '## Memory Effectiveness Commands',
+    '',
+    '- After a recall meaningfully informs your work, credit it with `awareness memory used --text "<entry substring>" --note "<why>"`.',
+    '- Periodically review `awareness memory stats` and act on dead-weight entries and repeated zero-result gaps.',
+    '',
+  ].join('\n'));
+  if (content !== original) actions.push('added memory effectiveness guidance');
+
+  if (!dryRun && content !== original) fs.writeFileSync(file, content);
+  return { file, actions };
+}
+
+function updateLongTermMemoryFile(file, dryRun) {
+  let content = fs.readFileSync(file, 'utf8');
+  const original = content;
+  const actions = [];
+
+  for (const section of ['Preferences', 'Patterns', 'Project Conventions', 'Review Guidance', 'Promotion Candidates', 'Review Notes', 'Event Log', 'Pruned Or Revised', 'Guardrails']) {
+    if (!extractSection(content, section)) {
+      content = replaceSection(content, section, '- None yet.\n');
+      actions.push(`added ${section}`);
+    }
+  }
+
+  content = appendLinesToSection(content, 'Review Notes', [
+    '- Use `awareness memory candidates` to inspect raw candidates.',
+    '- Use `awareness memory review` to surface repeated candidates that may deserve promotion as `Patterns`.',
+    '- Use `awareness memory promote --kind preference|pattern|project|review --text TEXT --evidence EVIDENCE` after review.',
+    '- After a recall helps, credit it with `awareness memory used --text TEXT --note TEXT`.',
+    '- Review effectiveness with `awareness memory stats` and investigate repeated zero-result gaps.',
+    '- Repeated candidates may share the same text with distinct evidence; do not collapse them before review.',
+  ]);
+
+  content = appendLinesToSection(content, 'Event Log', [
+    '- Append-only audit history: `memory/events.jsonl`',
+    '- Recall usage history: `runtime/recall/YYYY-MM-DD.jsonl`',
+    '- Markdown sections are readable projections.',
+    '- Do not hand-edit event history.',
+  ]);
+
+  content = appendLinesToSection(content, 'Guardrails', [
+    '- Do not store secrets, credentials, sensitive personal data, or raw transcripts.',
+    '- Do not promote one-off guesses without repeated evidence.',
+    '- Direct user instructions override memory.',
+    '- Remove or soften stale memory.',
+    '- Keep promotion evidence concise and linkable.',
+  ]);
+
+  if (content !== original && !actions.includes('updated guidance')) actions.push('updated guidance');
+  if (!dryRun && content !== original) fs.writeFileSync(file, content);
+  return { file, actions };
+}
+
+function appendUniqueBlock(content, requiredNeedles, block) {
+  if (requiredNeedles.every((needle) => content.includes(needle))) return content;
+  return `${content.trimEnd()}\n\n${block.trimEnd()}\n`;
+}
+
+function appendLinesToSection(content, section, lines) {
+  const current = extractSection(content, section);
+  const existing = new Set(current.split('\n').map((line) => line.trim()).filter(Boolean));
+  const missing = lines.filter((line) => !existing.has(line));
+  if (!missing.length) return content;
+  return appendToSection(content, section, `${missing.join('\n')}\n`);
 }
 
 function replaceSection(content, section, body) {

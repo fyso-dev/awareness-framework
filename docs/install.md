@@ -62,6 +62,16 @@ This creates missing files under `~/.agents/`:
 
 Existing files are not overwritten.
 
+After upgrading the npm package, run `init` again or use `update` to apply any new non-destructive template guidance to existing private files:
+
+```bash
+awareness init
+awareness update --dry-run
+awareness update
+```
+
+Both paths preserve live state and memory. They only add known missing guidance or sections to existing private files.
+
 Initialize a channel-scoped state folder:
 
 ```bash
