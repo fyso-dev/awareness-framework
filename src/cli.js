@@ -20,6 +20,7 @@ import {
   parseCuratedEntries,
 } from './memory-metrics.js';
 import { renderMemoryStatsJson, renderMemoryStatsText } from './memory-stats.js';
+import { runMemoryTrigger } from './memory-trigger.js';
 
 const VALID_STATES = new Set(['started', 'in-progress', 'paused', 'blocked', 'waiting', 'done', 'in-review', 'ready']);
 const DEFAULT_STATE = 'in-progress';
@@ -151,6 +152,7 @@ Usage:
   awareness memory promote --kind preference|pattern|project|review --text TEXT --evidence TEXT [--home PATH]
   awareness memory used (--text TEXT | --key KEY) [--note TEXT] [--home PATH]
   awareness memory stats [--since today|7d|30d|all] [--json] [--snapshot] [--home PATH]
+  awareness memory trigger --phase PHASE [--text TEXT] [--action TEXT] [--json] [--home PATH]
   awareness remember --text TEXT --evidence TEXT [--home PATH]
   awareness recall QUERY [--limit N] [--home PATH]
   awareness stats [--since today|7d|30d|all] [--json] [--snapshot] [--home PATH]
@@ -434,9 +436,11 @@ function memoryCommand(ctx, subcommand, opts) {
       return memoryUsedCommand(ctx, home, opts);
     case 'stats':
       return memoryStatsCommand(ctx, home, opts);
+    case 'trigger':
+      return memoryTriggerCommand(ctx, home, opts);
     default:
       err(ctx, `Unknown memory command: ${subcommand}`);
-      err(ctx, 'Use: candidates, show, review, note, promote, used, or stats.');
+      err(ctx, 'Use: candidates, show, review, note, promote, used, stats, or trigger.');
       return 1;
   }
 }
@@ -597,6 +601,34 @@ function memoryStatsCommand(ctx, home, opts) {
 
   out(ctx, opts.json ? renderMemoryStatsJson(metrics) : renderMemoryStatsText(metrics));
   return 0;
+}
+
+function memoryTriggerCommand(ctx, home, opts) {
+  const trigger = runAndRecordMemoryTrigger(ctx, home, {
+    phase: required(opts, 'phase'),
+    text: opts.text && opts.text !== true ? opts.text : '',
+    action: opts.action && opts.action !== true ? opts.action : '',
+  });
+
+  if (opts.json) {
+    out(ctx, JSON.stringify(trigger, null, 2));
+    return 0;
+  }
+
+  out(ctx, `Memory trigger: ${trigger.skipped ? 'skipped' : 'injected'}`);
+  out(ctx, `- Phase: ${trigger.phase}`);
+  out(ctx, `- Provider: ${formatTriggerProvider(trigger)}`);
+  out(ctx, `- Confidence: ${trigger.confidence.toFixed(2)}`);
+  out(ctx, `- Reason: ${trigger.reason || trigger.skipReason || 'n/a'}`);
+  out(ctx, `- Injected memories: ${trigger.injectedMemories.length}`);
+  out(ctx, `- Injected tokens: ${trigger.tokens.injectedTokens}`);
+  out(ctx, `- Context overhead: ${(trigger.tokens.contextOverheadPct * 100).toFixed(2)}%`);
+  if (trigger.injectedText) out(ctx, `\n${trigger.injectedText}`);
+  return 0;
+}
+
+function formatTriggerProvider(trigger) {
+  return trigger.model ? `${trigger.provider}/${trigger.model}` : trigger.provider;
 }
 
 function memoryPromotionSection(kind) {
@@ -890,9 +922,53 @@ function hookRunCommand(ctx, opts) {
 
   if (CONTEXT_INJECTION_EVENTS.has(event)) {
     emitFocusContext(ctx, home);
+    emitTriggeredMemory(ctx, home, event, tool);
   }
 
   return 0;
+}
+
+function emitTriggeredMemory(ctx, home, event, tool) {
+  const trigger = runAndRecordMemoryTrigger(ctx, home, {
+    phase: event,
+    text: `tool=${tool}`,
+  });
+  if (trigger.injectedText) {
+    out(ctx, '');
+    out(ctx, trigger.injectedText);
+  }
+}
+
+function runAndRecordMemoryTrigger(ctx, home, { phase, text = '', action = '' }) {
+  const focus = currentFocusText(home);
+  const trigger = runMemoryTrigger({
+    home,
+    ctx,
+    phase,
+    text,
+    action,
+    focus,
+    currentContext: currentContext(home),
+  });
+  appendRuntimeEvent(home, todayParts(ctx), 'memory-trigger', {
+    source: 'memory.trigger',
+    phase: trigger.phase,
+    provider: trigger.provider,
+    model: trigger.model,
+    shouldRecall: trigger.shouldRecall,
+    skipped: trigger.skipped,
+    skipReason: trigger.skipReason,
+    confidence: trigger.confidence,
+    reason: trigger.reason,
+    intent: trigger.intent,
+    risk: trigger.risk,
+    candidates: trigger.candidates,
+    injected: trigger.injectedMemories.length,
+    injectedKeys: trigger.injectedMemories.map((memory) => memory.key),
+    tokens: trigger.tokens,
+    durationMs: trigger.durationMs,
+  });
+  return trigger;
 }
 
 // Print the Current Focus as injectable context for the host agent. Framed as
@@ -900,13 +976,19 @@ function hookRunCommand(ctx, opts) {
 function emitFocusContext(ctx, home) {
   const currentPath = awarenessPath(home);
   if (!fs.existsSync(currentPath)) return;
-  const focus = extractSection(fs.readFileSync(currentPath, 'utf8'), 'Current Focus').trim();
+  const focus = currentFocusText(home);
   if (!focus) return;
   out(ctx, '[awareness] Load this before doing work — current focus:');
   out(ctx, '');
   out(ctx, focus);
   out(ctx, '');
   out(ctx, 'Follow the awareness protocol; run `awareness handoff` before yielding control.');
+}
+
+function currentFocusText(home) {
+  const currentPath = awarenessPath(home);
+  if (!fs.existsSync(currentPath)) return '';
+  return extractSection(fs.readFileSync(currentPath, 'utf8'), 'Current Focus').trim();
 }
 
 function hookInstallCommand(ctx, opts) {
@@ -1507,6 +1589,7 @@ function updateProtocolFile(file, dryRun) {
   let content = fs.readFileSync(file, 'utf8');
   const original = content;
   const actions = [];
+  const triggerGuidance = '- Use `awareness memory trigger --phase PHASE --text TEXT` or `--action TEXT` when an AI-configured trigger should decide whether memory is relevant; do not substitute hardcoded keyword rules for this decision.';
 
   content = appendUniqueBlock(content, [
     '## Memory Effectiveness Commands',
@@ -1518,6 +1601,10 @@ function updateProtocolFile(file, dryRun) {
     '',
   ].join('\n'));
   if (content !== original) actions.push('added memory effectiveness guidance');
+
+  const beforeTriggerGuidance = content;
+  content = appendLinesToSection(content, 'Memory Effectiveness Commands', [triggerGuidance]);
+  if (content !== beforeTriggerGuidance) actions.push('added memory trigger guidance');
 
   if (!dryRun && content !== original) fs.writeFileSync(file, content);
   return { file, actions };

@@ -218,6 +218,7 @@ awareness memory used --key a1b2c3 --note "The curated entry directly informed t
 awareness memory stats --since 7d
 awareness memory stats --since all --json
 awareness memory stats --since 30d --snapshot
+awareness memory trigger --phase pre-action --action "npm publish"
 ```
 
 `memory show` prints the curated long-term memory (Preferences, Patterns, Project Conventions, Review Guidance) grouped by section. Empty sections, raw promotion candidates, and pruned or revised entries are omitted, so it is a quick read-only view of what is actually durable.
@@ -231,6 +232,21 @@ Valid promotion kinds are `preference`, `pattern`, `project`, and `review`.
 `memory used` credits a curated long-term entry that actually helped a task. Use `--text` to match by content or `--key` to target the deterministic entry key shown in `memory stats --json`; add an optional `--note` to explain why the memory mattered. Each use appends a `memory.used` event to `memory/events.jsonl` with the matched key, the curated text, and the note.
 
 `memory stats` summarizes whether stored memory is healthy, utilized, and useful. The command accepts `--since today`, `--since 7d`, `--since 30d`, or `--since all`, prints text by default, emits machine-readable JSON with `--json`, and appends the aggregate snapshot to `runtime/metrics/YYYY-MM-DD.jsonl` with `--snapshot`.
+
+`memory trigger` asks a configured AI trigger provider whether the current phase/action/message should recall local memory. It does not use keyword rules. Configure `AWARENESS_MEMORY_TRIGGER_COMMAND` with an executable that reads a JSON context from stdin and returns JSON:
+
+```json
+{
+  "shouldRecall": true,
+  "confidence": 0.87,
+  "intent": "release conventions and local CLI update requirements",
+  "reason": "The next action is a release, where prior project rules may affect behavior.",
+  "risk": "high",
+  "model": "gpt-5.4-mini"
+}
+```
+
+If no provider is configured, the trigger records a skipped decision instead of guessing from keywords and does not charge internal decision tokens. Provider calls are bounded by `AWARENESS_MEMORY_TRIGGER_TIMEOUT_MS` (default `3000`) and fail closed as skipped decisions. Trigger output is token-accounted: internal decision/retrieval tokens are separated from injected context tokens, and context overhead is computed against `AWARENESS_CONTEXT_BUDGET_TOKENS` (default `128000`). Retrieval injects only curated long-term memory sections plus recent worklog context, so inactive promotion candidates and pruned audit entries are not resurrected as durable memory.
 
 Reported levels:
 
@@ -278,6 +294,7 @@ Reported metrics:
 - **Scheduled runs** — counts by cadence and the warnings trend (from `runtime/schedule`).
 - **Memory** — candidates created (by source), promotions (by kind), prunes, and pattern suggestions (from `memory/events.jsonl`).
 - **Recall (hits)** — calls, average results per call, zero-result queries, repeated zero-result queries, and the most frequent queries and matched files (from `runtime/recall`).
+- **Memory Trigger** — AI trigger calls, injected/skipped decisions, phase/provider breakdown, injected token totals, internal decision token estimates, and context overhead percentage.
 - **Activity** — worklog entries, distinct tasks, and distinct repositories in the window (from `worklog/*.md`).
 - **Storage** — file count and bytes per area, computed on demand.
 

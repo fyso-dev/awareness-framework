@@ -90,6 +90,7 @@ export function collectMemoryMetrics(home, referenceDate, since = '7d') {
   const coverage = summarizeCoverage(recalls);
   const outcome = summarizeOutcome(events, entries, recalls);
   const pipeline = summarizePipeline(events, allEvents, store);
+  const trigger = summarizeTrigger(readRuntimeEvents(home, 'memory-trigger', bounds));
   const scorecard = buildScorecard({ utilization, coverage, outcome, pipeline });
 
   return {
@@ -99,6 +100,7 @@ export function collectMemoryMetrics(home, referenceDate, since = '7d') {
     coverage,
     outcome,
     pipeline,
+    trigger,
     scorecard,
   };
 }
@@ -228,6 +230,41 @@ function summarizePipeline(events, allEvents, store) {
     medianTimeToPromotionDays: median(timeToPromotion),
     avgTimeToPromotionDays: average(timeToPromotion),
     sourceMix: store.sourceMix,
+  };
+}
+
+function summarizeTrigger(events) {
+  const calls = events.filter((event) => event.source === 'memory.trigger');
+  const injected = calls.filter((event) => Number(event.injected) > 0);
+  const skipped = calls.filter((event) => event.skipped);
+  const injectedTokens = calls.map((event) => Number(event.tokens?.injectedTokens) || 0);
+  const internalTokens = calls.map((event) => Number(event.tokens?.totalInternalTokens) || 0);
+  const overheadPct = calls.map((event) => Number(event.tokens?.contextOverheadPct) || 0);
+  return {
+    funnel: {
+      calls: calls.length,
+      injected: injected.length,
+      skipped: skipped.length,
+      injectionRate: calls.length ? injected.length / calls.length : 0,
+      skipReasons: countBy(skipped, 'skipReason'),
+    },
+    tokens: {
+      totalInjectedTokens: sum(injectedTokens),
+      avgInjectedTokens: numericAverage(injectedTokens),
+      p95InjectedTokens: percentile(injectedTokens, 0.95),
+      totalInternalTokens: sum(internalTokens),
+      avgInternalTokens: numericAverage(internalTokens),
+      avgContextOverheadPct: numericAverage(overheadPct),
+      p95ContextOverheadPct: percentile(overheadPct, 0.95),
+      maxContextOverheadPct: overheadPct.length ? Math.max(...overheadPct) : 0,
+    },
+    phases: Object.entries(groupByPhase(calls)).map(([phase, rows]) => ({
+      phase,
+      calls: rows.length,
+      injected: rows.filter((event) => Number(event.injected) > 0).length,
+      skipped: rows.filter((event) => event.skipped).length,
+      avgContextOverheadPct: numericAverage(rows.map((event) => Number(event.tokens?.contextOverheadPct) || 0)),
+    })),
   };
 }
 
@@ -429,6 +466,31 @@ function countBy(items, key) {
     counts[value] = (counts[value] || 0) + 1;
   }
   return counts;
+}
+
+function groupByPhase(items) {
+  const groups = {};
+  for (const item of items) {
+    const phase = item.phase || 'unknown';
+    groups[phase] ||= [];
+    groups[phase].push(item);
+  }
+  return groups;
+}
+
+function sum(values) {
+  return values.reduce((total, value) => total + value, 0);
+}
+
+function numericAverage(values) {
+  return values.length ? sum(values) / values.length : 0;
+}
+
+function percentile(values, pct) {
+  if (!values.length) return 0;
+  const sorted = values.toSorted((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * pct) - 1);
+  return sorted[index];
 }
 
 function countQueries(recalls) {
