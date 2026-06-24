@@ -225,8 +225,8 @@ function initCommand(ctx, opts) {
 
 function updateCommand(ctx, opts) {
   const home = agentsHome(ctx, opts);
-  ensurePrivateState(home, ctx);
   const dryRun = Boolean(opts.dryRun);
+  if (!dryRun) ensurePrivateState(home, ctx);
   const changes = privateStateTemplateUpdates(home, dryRun);
 
   out(ctx, `Awareness home: ${home}`);
@@ -1479,9 +1479,16 @@ function ensurePrivateState(home, ctx) {
 
 function privateStateTemplateUpdates(home, dryRun) {
   return [
-    updateProtocolFile(path.join(home, 'AGENTS.md'), dryRun),
-    updateLongTermMemoryFile(longTermMemoryPath(home), dryRun),
+    updatePrivateTemplateFile(path.join(home, 'AGENTS.md'), dryRun, updateProtocolFile),
+    updatePrivateTemplateFile(longTermMemoryPath(home), dryRun, updateLongTermMemoryFile),
   ].filter((change) => change.actions.length);
+}
+
+function updatePrivateTemplateFile(file, dryRun, updateFile) {
+  if (!fs.existsSync(file)) {
+    return { file, actions: dryRun ? ['would create missing private file'] : [] };
+  }
+  return updateFile(file, dryRun);
 }
 
 function updateProtocolFile(file, dryRun) {
@@ -1490,8 +1497,7 @@ function updateProtocolFile(file, dryRun) {
   const actions = [];
 
   content = appendUniqueBlock(content, [
-    'awareness memory used',
-    'awareness memory stats',
+    '## Memory Effectiveness Commands',
   ], [
     '## Memory Effectiveness Commands',
     '',
@@ -1561,7 +1567,7 @@ function appendLinesToSection(content, section, lines) {
 
 function replaceSection(content, section, body) {
   const heading = `## ${section}`;
-  const pattern = new RegExp(`(^|\\n)(## ${escapeRegExp(section)}\\n\\n?)([\\s\\S]*?)(?=\\n## |$)`);
+  const pattern = new RegExp(`(^|\\n)(## ${escapeRegExp(section)}\\n)([\\s\\S]*?)(?=\\n## |$)`);
   if (pattern.test(content)) {
     return content.replace(pattern, `$1$2${body.trimEnd()}\n`);
   }
@@ -1577,7 +1583,7 @@ function appendToSection(content, section, addition) {
 }
 
 function extractSection(content, section) {
-  const pattern = new RegExp(`(?:^|\\n)## ${escapeRegExp(section)}\\n\\n?([\\s\\S]*?)(?=\\n## |$)`);
+  const pattern = new RegExp(`(?:^|\\n)## ${escapeRegExp(section)}\\n([\\s\\S]*?)(?=\\n## |$)`);
   const match = pattern.exec(content);
   return match ? match[1] : '';
 }

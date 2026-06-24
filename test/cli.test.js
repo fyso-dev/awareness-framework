@@ -103,6 +103,65 @@ test('update previews and applies private state template additions without overw
   assert.match(again.stdout, /Updated: none/);
 });
 
+test('update dry-run does not create missing private state files', () => {
+  const home = tempHome();
+
+  const preview = run(['update', '--dry-run'], home);
+
+  assert.equal(preview.code, 0);
+  assert.match(preview.stdout, /Would update/);
+  assert.match(preview.stdout, /would create missing private file/);
+  assert.equal(fs.existsSync(path.join(home, 'AGENTS.md')), false);
+  assert.equal(fs.existsSync(path.join(home, 'awareness', 'current.md')), false);
+  assert.equal(fs.existsSync(path.join(home, 'memory', 'long-term.md')), false);
+});
+
+test('update adds protocol block even when command names already exist elsewhere', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const protocol = path.join(home, 'AGENTS.md');
+  fs.writeFileSync(protocol, [
+    '# Agent Instructions',
+    '',
+    'Existing rules mention `awareness memory used` and `awareness memory stats` inline.',
+    '',
+  ].join('\n'));
+
+  const result = run(['update'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(fs.readFileSync(protocol, 'utf8'), /## Memory Effectiveness Commands/);
+});
+
+test('update appends guidance into blank consecutive sections', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const longTerm = path.join(home, 'memory', 'long-term.md');
+  fs.writeFileSync(longTerm, `# Long-Term Memory
+
+## Review Notes
+
+## Event Log
+
+## Guardrails
+`);
+
+  const result = run(['update'], home);
+
+  assert.equal(result.code, 0);
+  const updated = fs.readFileSync(longTerm, 'utf8');
+  const reviewNotesIndex = updated.indexOf('Use `awareness memory candidates`');
+  const eventHeadingIndex = updated.indexOf('## Event Log');
+  const eventLogIndex = updated.indexOf('Append-only audit history');
+  const guardrailsHeadingIndex = updated.indexOf('## Guardrails');
+  const guardrailIndex = updated.indexOf('Do not store secrets');
+  assert.equal(reviewNotesIndex > updated.indexOf('## Review Notes'), true);
+  assert.equal(reviewNotesIndex < eventHeadingIndex, true);
+  assert.equal(eventLogIndex > eventHeadingIndex, true);
+  assert.equal(eventLogIndex < guardrailsHeadingIndex, true);
+  assert.equal(guardrailIndex > guardrailsHeadingIndex, true);
+});
+
 test('init auto-updates existing private state templates without overwriting memory', () => {
   const home = tempHome();
   run(['init'], home);
