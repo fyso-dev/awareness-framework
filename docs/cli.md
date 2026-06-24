@@ -202,6 +202,11 @@ awareness memory review
 awareness memory review --min-count 3
 awareness memory note --text "User prefers active memory review" --evidence "Direct request"
 awareness memory promote --kind preference --text "Surface memory candidates proactively" --evidence "User confirmed"
+awareness memory used --text "Prefer recall before repeating implementation work" --note "Saved a duplicate effort"
+awareness memory used --key a1b2c3 --note "The curated entry directly informed this fix"
+awareness memory stats --since 7d
+awareness memory stats --since all --json
+awareness memory stats --since 30d --snapshot
 ```
 
 `memory show` prints the curated long-term memory (Preferences, Patterns, Project Conventions, Review Guidance) grouped by section. Empty sections, raw promotion candidates, and pruned or revised entries are omitted, so it is a quick read-only view of what is actually durable.
@@ -211,6 +216,19 @@ awareness memory promote --kind preference --text "Surface memory candidates pro
 `memory candidates` lists active promotion candidates only. Text that has been pruned or revised remains in the Markdown history but is hidden from active candidates, excluded from suggestions, and rejected by `memory promote`.
 
 Valid promotion kinds are `preference`, `pattern`, `project`, and `review`.
+
+`memory used` credits a curated long-term entry that actually helped a task. Use `--text` to match by content or `--key` to target the deterministic entry key shown in `memory stats --json`; add an optional `--note` to explain why the memory mattered. Each use appends a `memory.used` event to `memory/events.jsonl` with the matched key, the curated text, and the note.
+
+`memory stats` summarizes whether stored memory is healthy, utilized, and useful. The command accepts `--since today`, `--since 7d`, `--since 30d`, or `--since all`, prints text by default, emits machine-readable JSON with `--json`, and appends the aggregate snapshot to `runtime/metrics/YYYY-MM-DD.jsonl` with `--snapshot`.
+
+Reported levels:
+
+- **Store health** — conversion from candidates to durable memory, source mix, churn, density, and freshness indicators.
+- **Utilization** — how often curated entries are recalled, which entries are workhorses, dead-weight entries that were never recalled, recall rate per session, and repeated zero-result queries as the gap detector.
+- **Outcome** — how often recalled entries are later credited with `memory.used`, plus contradictions or stale signals around those credited entries.
+- **Scorecard** — a composite summary that rolls the levels into a quick read on activation, precision, outcome, freshness, and overall usefulness.
+
+`runtime/recall/YYYY-MM-DD.jsonl` records the usage side of `recall`, including `curatedHits` when the recall matched curated long-term entries. `curatedHits` is an array of deterministic entry keys, so the same key can be attributed across multiple recalls without depending on line numbers or text formatting. Older recall events may not have this field; those rows simply count as unattributed history.
 
 ### Local memory operations
 
@@ -224,11 +242,11 @@ awareness improve
 ```
 
 `remember` records a promotion candidate and appends `memory.candidate.created` to `memory/events.jsonl`.
-`recall` performs deterministic local text search across memory, memory events, worklogs, and evaluations. Matching is case- and accent-insensitive, includes simple singular/plural normalization, and includes a small English/Spanish alias set for memory/user terms.
+`recall` performs local text search across memory, memory events, worklogs, and evaluations using an in-memory MiniSearch index. Matching is case- and accent-insensitive, supports prefix/fuzzy matches, preserves local-only privacy, and still includes a small curated alias set for common English/Spanish memory terms.
 `forget` records a prune/revision entry and appends `memory.pruned`; it does not destructively delete historical evidence, but pruned text is inactive for candidate review and promotion.
 `improve` runs the evaluation/review loop and appends `evaluation.created` and `pattern.suggested` events when applicable. Auto-generated evaluation candidates are deduplicated by text across days so recurring diagnostics do not flood human-curated candidates.
 
-`recall` also appends a usage event to `runtime/recall/YYYY-MM-DD.jsonl` (`source`, `query`, `terms`, `resultCount`, `topFiles`). These hits feed the recall metrics in `awareness stats`; queries with `resultCount: 0` highlight memory gaps.
+`recall` also appends a usage event to `runtime/recall/YYYY-MM-DD.jsonl` (`source`, `query`, `terms`, `resultCount`, `topFiles`, and `curatedHits` when available). These hits feed the recall metrics in `awareness stats`; queries with `resultCount: 0` highlight memory gaps.
 
 ### `stats`
 
@@ -248,7 +266,7 @@ Reported metrics:
 - **Sessions & hooks** — sessions started, total hook events, compactions, and a per-tool breakdown (from `runtime/hooks`).
 - **Scheduled runs** — counts by cadence and the warnings trend (from `runtime/schedule`).
 - **Memory** — candidates created (by source), promotions (by kind), prunes, and pattern suggestions (from `memory/events.jsonl`).
-- **Recall (hits)** — calls, average results per call, zero-result queries, and the most frequent queries and matched files (from `runtime/recall`).
+- **Recall (hits)** — calls, average results per call, zero-result queries, repeated zero-result queries, and the most frequent queries and matched files (from `runtime/recall`).
 - **Activity** — worklog entries, distinct tasks, and distinct repositories in the window (from `worklog/*.md`).
 - **Storage** — file count and bytes per area, computed on demand.
 
