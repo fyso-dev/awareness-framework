@@ -1246,7 +1246,35 @@ test('stats aggregates hooks, memory, recall, and storage', () => {
   assert.match(result.stdout, /Sessions started: 1/);
   assert.match(result.stdout, /Calls: 2/);
   assert.match(result.stdout, /Zero-result queries: 1/);
+  assert.match(result.stdout, /Private Templates/);
+  assert.match(result.stdout, /Status: up-to-date/);
   assert.match(result.stdout, /Storage/);
+});
+
+test('stats surfaces pending private template updates', () => {
+  const home = tempHome();
+  run(['init'], home);
+  fs.writeFileSync(path.join(home, 'AGENTS.md'), '# Existing Protocol\n');
+  fs.writeFileSync(path.join(home, 'memory', 'long-term.md'), `# Long-Term Memory
+
+## Review Notes
+
+## Event Log
+`);
+
+  const result = run(['stats', '--since', 'all'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Private Templates/);
+  assert.match(result.stdout, /Status: updates available/);
+  assert.match(result.stdout, /AGENTS\.md: added memory effectiveness guidance/);
+  assert.match(result.stdout, /memory\/long-term\.md:/);
+
+  const json = run(['stats', '--since', 'all', '--json'], home);
+  assert.equal(json.code, 0);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.privateTemplates.status, 'updates-available');
+  assert.equal(parsed.privateTemplates.pendingFiles.length, 2);
 });
 
 test('stats supports JSON output and snapshot persistence', () => {
@@ -1259,6 +1287,7 @@ test('stats supports JSON output and snapshot persistence', () => {
   const parsed = JSON.parse(json.stdout);
   assert.equal(parsed.window.since, '7d');
   assert.equal(parsed.recall.calls, 1);
+  assert.equal(parsed.privateTemplates.status, 'up-to-date');
 
   const snapshotLog = path.join(home, 'runtime', 'metrics', '2099-01-02.jsonl');
   assert.equal(fs.existsSync(snapshotLog), true);

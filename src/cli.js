@@ -667,6 +667,7 @@ function statsCommand(ctx, opts) {
   }
 
   const stats = collectStats(home, referenceNow(ctx), since);
+  stats.privateTemplates = summarizePrivateTemplateUpdates(home);
 
   if (opts.snapshot) {
     appendRuntimeEvent(home, todayParts(ctx), 'metrics', { source: 'stats.snapshot', since, stats });
@@ -674,6 +675,17 @@ function statsCommand(ctx, opts) {
 
   out(ctx, opts.json ? renderStatsJson(stats) : renderStatsText(stats));
   return 0;
+}
+
+function summarizePrivateTemplateUpdates(home) {
+  const pending = privateStateTemplateUpdates(home, true);
+  return {
+    status: pending.length ? 'updates-available' : 'up-to-date',
+    pendingFiles: pending.map((change) => ({
+      file: displayPath(home, change.file),
+      actions: change.actions,
+    })),
+  };
 }
 
 function referenceNow(ctx) {
