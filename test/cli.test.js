@@ -30,7 +30,11 @@ function repoRootForTests() {
   return path.resolve(new URL('..', import.meta.url).pathname);
 }
 
-function seedReleaseTrigger(home) {
+function readJsonl(file) {
+  return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+}
+
+function seedReleaseTrigger(home, env = {}) {
   run([
     'memory', 'promote',
     '--kind', 'project',
@@ -47,6 +51,7 @@ function seedReleaseTrigger(home) {
       model: 'test-ai',
     }),
     AWARENESS_CONTEXT_BUDGET_TOKENS: '1000',
+    ...env,
   });
 }
 
@@ -889,6 +894,7 @@ test('help lists local memory operation commands', () => {
   assert.match(stdout, /awareness remember --text TEXT --evidence TEXT/);
   assert.match(stdout, /awareness update \[--dry-run\]/);
   assert.match(stdout, /awareness memory trigger --phase PHASE/);
+  assert.match(stdout, /awareness memory debug .*--watch/);
   assert.match(stdout, /awareness recall QUERY/);
   assert.match(stdout, /awareness forget --text TEXT --reason TEXT --evidence TEXT/);
   assert.match(stdout, /awareness improve/);
@@ -1101,6 +1107,8 @@ test('documentation mentions memory effectiveness metrics', () => {
   assert.match(cliDocs, /awareness memory stats/);
   assert.match(cliDocs, /awareness memory used/);
   assert.match(cliDocs, /awareness memory trigger/);
+  assert.match(cliDocs, /AWARENESS_MEMORY_DEBUG=full/);
+  assert.match(cliDocs, /awareness memory debug --watch/);
   assert.match(memoryDocs, /Memory Efficiency|activation rate/i);
   assert.match(agentTemplate, /awareness memory used/);
   assert.match(agentTemplate, /awareness memory trigger/);
@@ -1157,6 +1165,70 @@ test('memory trigger injects AI-selected memories and records token overhead', (
   const parsedStats = JSON.parse(statsJson.stdout);
   assert.equal(parsedStats.trigger.efficiencyKpi.status, 'learning');
   assert.equal(parsedStats.trigger.efficiencyKpi.score, null);
+});
+
+test('memory trigger does not write debug transcript by default', () => {
+  const home = tempHome();
+  run(['init'], home);
+  seedReleaseTrigger(home);
+
+  assert.equal(fs.existsSync(path.join(home, 'runtime', 'memory-debug')), false);
+});
+
+test('memory debug summary records deduction retrieval and injection', () => {
+  const home = tempHome();
+  run(['init'], home);
+  seedReleaseTrigger(home, { AWARENESS_MEMORY_DEBUG: 'summary' });
+
+  const events = readJsonl(path.join(home, 'runtime', 'memory-debug', '2099-01-02.jsonl'));
+  const event = events.at(-1);
+  assert.equal(event.source, 'memory.debug');
+  assert.equal(event.level, 'summary');
+  assert.equal(event.decision.shouldRecall, true);
+  assert.equal(event.decision.intent, 'release guardrails publishing');
+  assert.equal(event.retrieval.query, 'release guardrails publishing');
+  assert.equal(event.injection.injected, true);
+  assert.equal(event.injection.keys.length, 1);
+  assert.match(event.injection.text, /Use release guardrails before publishing/);
+  assert.equal(event.transcript, undefined);
+
+  const text = run(['memory', 'debug', '--since', 'all'], home);
+  assert.equal(text.code, 0);
+  assert.match(text.stdout, /Memory Debug/);
+  assert.match(text.stdout, /Deduction: recall/);
+  assert.match(text.stdout, /Injected: yes/);
+
+  const json = run(['memory', 'debug', '--since', 'all', '--json'], home);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.at(-1).level, 'summary');
+});
+
+test('memory debug full records complete provider transcript context', () => {
+  const home = tempHome();
+  run(['init'], home);
+  seedReleaseTrigger(home, { AWARENESS_MEMORY_DEBUG: 'full' });
+
+  const events = readJsonl(path.join(home, 'runtime', 'memory-debug', '2099-01-02.jsonl'));
+  const event = events.at(-1);
+  assert.equal(event.level, 'full');
+  assert.equal(event.transcript.context.phase, 'pre-action');
+  assert.equal(event.transcript.context.action, 'publish');
+  assert.match(event.transcript.context.memory, /Use release guardrails before publishing/);
+  assert.equal(event.transcript.decision.model, 'test-ai');
+  assert.equal(event.transcript.candidates.length >= 1, true);
+
+  const text = run(['memory', 'debug', '--since', 'all', '--last', '1'], home);
+  assert.match(text.stdout, /Full transcript: context=/);
+});
+
+test('memory debug rejects invalid watch interval', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['memory', 'debug', '--watch', '--interval', '10'], home);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Invalid --interval/);
 });
 
 test('memory trigger efficiency KPI scores credited injected memory', () => {
