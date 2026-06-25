@@ -42,6 +42,7 @@ You operate in a multi-task, multi-agent environment. Before doing work, load th
 
 - Use `awareness remember` for explicit observations that should enter memory review.
 - Use `awareness recall QUERY` before repeating uncertain or previously solved work.
+- Use `awareness memory trigger --phase PHASE --text TEXT` or `--action TEXT` when an AI-configured trigger should decide whether memory is relevant; do not substitute hardcoded keyword rules for this decision.
 - Use `awareness memory used --text TEXT` or `--key KEY` to credit a curated memory that actually helped; include `--note` when the reason matters.
 - Review `awareness memory stats` periodically, and use `--json` when you need to inspect utilization, outcome, or repeated zero-result gaps.
 - Use `awareness forget --text TEXT --reason REASON --evidence EVIDENCE` when memory is stale, wrong, or superseded.

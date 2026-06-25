@@ -94,6 +94,7 @@ test('update previews and applies private state template additions without overw
   const updatedLongTerm = fs.readFileSync(longTerm, 'utf8');
   assert.match(updatedProtocol, /Keep my local instruction/);
   assert.match(updatedProtocol, /awareness memory stats/);
+  assert.match(updatedProtocol, /awareness memory trigger/);
   assert.match(updatedLongTerm, /Keep existing durable memory/);
   assert.match(updatedLongTerm, /## Review Notes/);
   assert.match(updatedLongTerm, /awareness memory used/);
@@ -131,6 +132,26 @@ test('update adds protocol block even when command names already exist elsewhere
 
   assert.equal(result.code, 0);
   assert.match(fs.readFileSync(protocol, 'utf8'), /## Memory Effectiveness Commands/);
+});
+
+test('update adds memory trigger guidance to existing protocol block', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const protocol = path.join(home, 'AGENTS.md');
+  fs.writeFileSync(protocol, [
+    '# Agent Instructions',
+    '',
+    '## Memory Effectiveness Commands',
+    '',
+    '- After a recall meaningfully informs your work, credit it with `awareness memory used --text "<entry substring>" --note "<why>"`.',
+    '',
+  ].join('\n'));
+
+  const result = run(['update'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /added memory trigger guidance/);
+  assert.match(fs.readFileSync(protocol, 'utf8'), /awareness memory trigger/);
 });
 
 test('update appends guidance into blank consecutive sections', () => {
@@ -847,6 +868,7 @@ test('help lists local memory operation commands', () => {
   assert.equal(code, 0);
   assert.match(stdout, /awareness remember --text TEXT --evidence TEXT/);
   assert.match(stdout, /awareness update \[--dry-run\]/);
+  assert.match(stdout, /awareness memory trigger --phase PHASE/);
   assert.match(stdout, /awareness recall QUERY/);
   assert.match(stdout, /awareness forget --text TEXT --reason TEXT --evidence TEXT/);
   assert.match(stdout, /awareness improve/);
@@ -1058,8 +1080,180 @@ test('documentation mentions memory effectiveness metrics', () => {
 
   assert.match(cliDocs, /awareness memory stats/);
   assert.match(cliDocs, /awareness memory used/);
+  assert.match(cliDocs, /awareness memory trigger/);
   assert.match(memoryDocs, /Memory Efficiency|activation rate/i);
   assert.match(agentTemplate, /awareness memory used/);
+  assert.match(agentTemplate, /awareness memory trigger/);
+});
+
+test('memory trigger injects AI-selected memories and records token overhead', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'project',
+    '--text', 'Before publishing, verify main is aligned with origin/main and update the global CLI after npm publish.',
+    '--evidence', 'release convention',
+  ], home);
+
+  const result = run([
+    'memory', 'trigger',
+    '--phase', 'pre-action',
+    '--action', 'publish release',
+  ], home, {
+    AWARENESS_MEMORY_TRIGGER_DECISION_JSON: JSON.stringify({
+      shouldRecall: true,
+      confidence: 0.91,
+      intent: 'publishing release main origin global CLI',
+      reason: 'Release actions have project conventions that can affect the next step.',
+      risk: 'high',
+      model: 'test-ai',
+    }),
+    AWARENESS_CONTEXT_BUDGET_TOKENS: '1000',
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Memory trigger: injected/);
+  assert.match(result.stdout, /Before publishing/);
+  assert.match(result.stdout, /Context overhead:/);
+
+  const events = fs.readFileSync(path.join(home, 'runtime', 'memory-trigger', '2099-01-02.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  const event = events.at(-1);
+  assert.equal(event.source, 'memory.trigger');
+  assert.equal(event.phase, 'pre-action');
+  assert.equal(event.provider, 'fixture');
+  assert.equal(event.injected, 1);
+  assert.ok(event.tokens.injectedTokens > 0);
+  assert.ok(event.tokens.contextOverheadPct > 0);
+
+  const stats = run(['memory', 'stats', '--since', 'all'], home);
+  assert.equal(stats.code, 0);
+  assert.match(stats.stdout, /Trigger Funnel/);
+  assert.match(stats.stdout, /Trigger Token Overhead/);
+  assert.match(stats.stdout, /Injected: 1/);
+});
+
+test('memory trigger only retrieves active curated long-term memory sections', () => {
+  const home = tempHome();
+  run(['init'], home);
+  fs.writeFileSync(path.join(home, 'memory', 'long-term.md'), `# Long-Term Memory
+
+## Preferences
+
+- 2099-01-01: Safe release requires verifying main against origin/main. (evidence: test)
+
+## Promotion Candidates
+
+- 2099-01-01: Stale release shortcut says publish from feature branches. (evidence: old)
+
+## Pruned Or Revised
+
+- 2099-01-01: Removed release shortcut says skip main verification. (reason: unsafe; evidence: test)
+`);
+
+  const result = run(['memory', 'trigger', '--phase', 'pre-action', '--action', 'release publish'], home, {
+    AWARENESS_MEMORY_TRIGGER_DECISION_JSON: JSON.stringify({
+      shouldRecall: true,
+      confidence: 0.94,
+      intent: 'release publish main verification',
+      reason: 'Release action can benefit from project memory.',
+      risk: 'high',
+      model: 'test-ai',
+    }),
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Safe release requires verifying main/);
+  assert.doesNotMatch(result.stdout, /Stale release shortcut/);
+  assert.doesNotMatch(result.stdout, /Removed release shortcut/);
+});
+
+test('memory trigger continues past oversized candidates', () => {
+  const home = tempHome();
+  run(['init'], home);
+  const longReleaseMemory = `release guardrails ${'extra context '.repeat(200)}`;
+  fs.writeFileSync(path.join(home, 'memory', 'long-term.md'), `# Long-Term Memory
+
+## Project Conventions
+
+- 2099-01-01: ${longReleaseMemory} (evidence: test)
+- 2099-01-01: Release guardrails require main alignment. (evidence: test)
+`);
+
+  const result = run(['memory', 'trigger', '--phase', 'pre-action', '--action', 'release guardrails'], home, {
+    AWARENESS_MEMORY_TRIGGER_DECISION_JSON: JSON.stringify({
+      shouldRecall: true,
+      confidence: 0.9,
+      intent: 'release guardrails',
+      reason: 'Needs release memory.',
+      risk: 'high',
+      model: 'test-ai',
+    }),
+    AWARENESS_MEMORY_TRIGGER_MAX_TOKENS: '20',
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Release guardrails require main alignment/);
+});
+
+test('memory trigger skips without an AI provider instead of using keyword rules', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['memory', 'trigger', '--phase', 'message', '--text', 'publish release'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Memory trigger: skipped/);
+  assert.match(result.stdout, /AI trigger provider not configured/);
+  assert.doesNotMatch(result.stdout, /\[awareness memory\]/);
+
+  const events = fs.readFileSync(path.join(home, 'runtime', 'memory-trigger', '2099-01-02.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  const event = events.at(-1);
+  assert.equal(event.provider, 'none');
+  assert.equal(event.tokens.decisionTokensIn, 0);
+  assert.equal(event.tokens.totalInternalTokens, 0);
+});
+
+test('memory trigger provider timeout fails closed', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['memory', 'trigger', '--phase', 'message', '--text', 'release'], home, {
+    AWARENESS_MEMORY_TRIGGER_COMMAND: process.execPath,
+    AWARENESS_MEMORY_TRIGGER_ARGS_JSON: JSON.stringify(['-e', 'setTimeout(() => {}, 2000)']),
+    AWARENESS_MEMORY_TRIGGER_TIMEOUT_MS: '50',
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Memory trigger: skipped/);
+  assert.match(result.stdout, /timeout/);
+});
+
+test('hook session-start injects triggered memories when AI trigger fires', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'project',
+    '--text', 'Use subagents with model choice according to task complexity.',
+    '--evidence', 'user preference',
+  ], home);
+
+  const result = run(['hook', 'run', '--tool', 'codex', '--event', 'session-start', '--quiet'], home, {
+    AWARENESS_MEMORY_TRIGGER_DECISION_JSON: JSON.stringify({
+      shouldRecall: true,
+      confidence: 0.86,
+      intent: 'subagents model task complexity',
+      reason: 'Session start should restore relevant operating preferences.',
+      risk: 'medium',
+      model: 'test-ai',
+    }),
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Load this before doing work/);
+  assert.match(result.stdout, /\[awareness memory\]/);
+  assert.match(result.stdout, /Use subagents with model choice/);
 });
 
 test('hook run records a low-noise runtime event', () => {
@@ -1275,6 +1469,42 @@ test('stats surfaces pending private template updates', () => {
   const parsed = JSON.parse(json.stdout);
   assert.equal(parsed.privateTemplates.status, 'updates-available');
   assert.equal(parsed.privateTemplates.pendingFiles.length, 2);
+});
+
+test('stats aggregates memory trigger token overhead', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run([
+    'memory', 'promote',
+    '--kind', 'project',
+    '--text', 'Use release guardrails before publishing.',
+    '--evidence', 'release convention',
+  ], home);
+  run(['memory', 'trigger', '--phase', 'pre-action', '--action', 'publish'], home, {
+    AWARENESS_MEMORY_TRIGGER_DECISION_JSON: JSON.stringify({
+      shouldRecall: true,
+      confidence: 0.9,
+      intent: 'release guardrails publishing',
+      reason: 'Release action can benefit from project memory.',
+      risk: 'high',
+      model: 'test-ai',
+    }),
+    AWARENESS_CONTEXT_BUDGET_TOKENS: '1000',
+  });
+
+  const result = run(['stats', '--since', 'all'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Memory Trigger/);
+  assert.match(result.stdout, /Calls: 1/);
+  assert.match(result.stdout, /Injected\/skipped: 1\/0/);
+  assert.match(result.stdout, /Avg context overhead:/);
+
+  const json = run(['stats', '--since', 'all', '--json'], home);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.memoryTrigger.calls, 1);
+  assert.equal(parsed.memoryTrigger.injected, 1);
+  assert.ok(parsed.memoryTrigger.totalInjectedTokens > 0);
 });
 
 test('stats supports JSON output and snapshot persistence', () => {

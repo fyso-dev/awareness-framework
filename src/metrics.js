@@ -132,6 +132,28 @@ export function summarizeRecall(events) {
   };
 }
 
+export function summarizeMemoryTriggers(events) {
+  const calls = events.filter((event) => event.source === 'memory.trigger');
+  const injected = calls.filter((event) => Number(event.injected) > 0);
+  const skipped = calls.filter((event) => event.skipped);
+  const injectedTokens = calls.map((event) => Number(event.tokens?.injectedTokens) || 0);
+  const internalTokens = calls.map((event) => Number(event.tokens?.totalInternalTokens) || 0);
+  const contextOverhead = calls.map((event) => Number(event.tokens?.contextOverheadPct) || 0);
+  return {
+    calls: calls.length,
+    injected: injected.length,
+    skipped: skipped.length,
+    byPhase: tallyBy(calls, 'phase'),
+    byProvider: tallyBy(calls, 'provider'),
+    avgInjectedTokens: average(injectedTokens),
+    p95InjectedTokens: percentile(injectedTokens, 0.95),
+    totalInjectedTokens: injectedTokens.reduce((sum, value) => sum + value, 0),
+    avgInternalTokens: average(internalTokens),
+    avgContextOverheadPct: average(contextOverhead),
+    maxContextOverheadPct: contextOverhead.length ? Math.max(...contextOverhead) : 0,
+  };
+}
+
 function countFileHits(calls) {
   const counts = {};
   for (const call of calls) {
@@ -149,6 +171,18 @@ export function topEntries(counts, limit) {
     .slice(0, limit)
     .map(([name, count]) => ({ name, count }));
 }
+
+function average(values) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function percentile(values, pct) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * pct) - 1);
+  return sorted[index];
+}
+
 
 // Worklog activity within the window, parsed from the daily markdown files.
 export function summarizeActivity(home, bounds) {
@@ -256,6 +290,7 @@ export function collectStats(home, referenceDate, since = '7d') {
     ]),
     memory: summarizeMemory(memoryEvents, bounds),
     recall: summarizeRecall(readRuntimeEvents(home, 'recall', bounds)),
+    memoryTrigger: summarizeMemoryTriggers(readRuntimeEvents(home, 'memory-trigger', bounds)),
     activity: summarizeActivity(home, bounds),
     storage: summarizeStorage(home),
   };

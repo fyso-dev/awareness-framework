@@ -50,6 +50,19 @@ export function renderMemoryStatsText(metrics) {
     `- Distinct entries used: ${metrics.outcome.distinctEntriesUsed}`,
     `- Per-entry usefulness: ${formatCounts(metrics.outcome.perEntryUsefulness)}`,
     `- Contradictions: ${metrics.outcome.contradictions.length}`,
+    '',
+    'Trigger Funnel',
+    `- Calls: ${metrics.trigger.funnel.calls}`,
+    `- Injected: ${metrics.trigger.funnel.injected} (${formatPercent(metrics.trigger.funnel.injectionRate)})`,
+    `- Skipped: ${metrics.trigger.funnel.skipped}`,
+    `- Skip reasons: ${formatCounts(metrics.trigger.funnel.skipReasons)}`,
+    '',
+    'Trigger Token Overhead',
+    `- Injected context tokens: ${metrics.trigger.tokens.totalInjectedTokens} total, ${formatNumber(metrics.trigger.tokens.avgInjectedTokens)}/call`,
+    `- P95 injected tokens: ${metrics.trigger.tokens.p95InjectedTokens}`,
+    `- Internal trigger tokens: ${metrics.trigger.tokens.totalInternalTokens} total, ${formatNumber(metrics.trigger.tokens.avgInternalTokens)}/call`,
+    `- Context overhead avg/p95/max: ${formatPrecisePercent(metrics.trigger.tokens.avgContextOverheadPct)} / ${formatPrecisePercent(metrics.trigger.tokens.p95ContextOverheadPct)} / ${formatPrecisePercent(metrics.trigger.tokens.maxContextOverheadPct)}`,
+    `- By phase: ${formatTriggerPhases(metrics.trigger.phases)}`,
   ].join('\n');
 }
 
@@ -72,8 +85,19 @@ function formatRepeatedGaps(gaps) {
   return gaps.map((gap) => `"${gap.query}" (${gap.count})`).join(', ');
 }
 
+function formatTriggerPhases(phases) {
+  if (!phases.length) return 'none';
+  return phases
+    .map((phase) => `${phase.phase}=${phase.calls} calls/${phase.injected} injected/${formatPrecisePercent(phase.avgContextOverheadPct)} overhead`)
+    .join(', ');
+}
+
 function formatPercent(value) {
   return `${Math.round((value || 0) * 100)}%`;
+}
+
+function formatPrecisePercent(value) {
+  return `${((value || 0) * 100).toFixed(2)}%`;
 }
 
 function formatNumber(value) {
