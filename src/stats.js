@@ -1,5 +1,6 @@
 // Rendering for `awareness stats`. Pure string builders so the CLI just writes
 // the result. The metrics shape comes from src/metrics.js.
+import { formatTriggerEfficiencyKpi } from './trigger-efficiency.js';
 
 export function renderStatsJson(stats) {
   return JSON.stringify(stats, null, 2);
@@ -46,6 +47,7 @@ export function renderStatsText(stats) {
     `- Injected/skipped: ${stats.memoryTrigger.injected}/${stats.memoryTrigger.skipped}`,
     `- By phase: ${formatCounts(stats.memoryTrigger.byPhase)}`,
     `- By provider: ${formatCounts(stats.memoryTrigger.byProvider)}`,
+    `- Efficiency KPI: ${formatTriggerEfficiencyKpi(stats.memoryTrigger.efficiencyKpi)}`,
     `- Avg injected tokens: ${stats.memoryTrigger.avgInjectedTokens.toFixed(1)}`,
     `- P95 injected tokens: ${stats.memoryTrigger.p95InjectedTokens}`,
     `- Total injected tokens: ${stats.memoryTrigger.totalInjectedTokens}`,

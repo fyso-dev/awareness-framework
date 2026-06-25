@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { windowBounds, withinWindow, parseJsonl, readRuntimeEvents } from './metrics.js';
+import { countCreditedTriggerInjections, triggerEfficiencyKpi } from './trigger-efficiency.js';
 
 const CURATED_SECTIONS = new Set(['Preferences', 'Patterns', 'Project Conventions', 'Review Guidance']);
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -90,7 +91,7 @@ export function collectMemoryMetrics(home, referenceDate, since = '7d') {
   const coverage = summarizeCoverage(recalls);
   const outcome = summarizeOutcome(events, entries, recalls);
   const pipeline = summarizePipeline(events, allEvents, store);
-  const trigger = summarizeTrigger(readRuntimeEvents(home, 'memory-trigger', bounds));
+  const trigger = summarizeTrigger(readRuntimeEvents(home, 'memory-trigger', bounds), outcome);
   const scorecard = buildScorecard({ utilization, coverage, outcome, pipeline });
 
   return {
@@ -215,6 +216,7 @@ function summarizeOutcome(events, entries, recalls) {
   return {
     usedEvents: used.length,
     distinctEntriesUsed: usedKeys.size,
+    usedKeys: [...usedKeys],
     usefulRecallRate: recalledKeys.size ? usefulKeys.length / recalledKeys.size : 0,
     perEntryUsefulness,
     contradictions: contradictions(events),
@@ -233,13 +235,17 @@ function summarizePipeline(events, allEvents, store) {
   };
 }
 
-function summarizeTrigger(events) {
+function summarizeTrigger(events, outcome = {}) {
   const calls = events.filter((event) => event.source === 'memory.trigger');
   const injected = calls.filter((event) => Number(event.injected) > 0);
   const skipped = calls.filter((event) => event.skipped);
   const injectedTokens = calls.map((event) => Number(event.tokens?.injectedTokens) || 0);
   const internalTokens = calls.map((event) => Number(event.tokens?.totalInternalTokens) || 0);
   const overheadPct = calls.map((event) => Number(event.tokens?.contextOverheadPct) || 0);
+  const totalInjectedTokens = sum(injectedTokens);
+  const totalInternalTokens = sum(internalTokens);
+  const avgContextOverheadPct = numericAverage(overheadPct);
+  const creditedUses = countCreditedTriggerInjections(calls, outcome.usedKeys);
   return {
     funnel: {
       calls: calls.length,
@@ -249,15 +255,22 @@ function summarizeTrigger(events) {
       skipReasons: countBy(skipped, 'skipReason'),
     },
     tokens: {
-      totalInjectedTokens: sum(injectedTokens),
+      totalInjectedTokens,
       avgInjectedTokens: numericAverage(injectedTokens),
       p95InjectedTokens: percentile(injectedTokens, 0.95),
-      totalInternalTokens: sum(internalTokens),
+      totalInternalTokens,
       avgInternalTokens: numericAverage(internalTokens),
-      avgContextOverheadPct: numericAverage(overheadPct),
+      avgContextOverheadPct,
       p95ContextOverheadPct: percentile(overheadPct, 0.95),
       maxContextOverheadPct: overheadPct.length ? Math.max(...overheadPct) : 0,
     },
+    efficiencyKpi: triggerEfficiencyKpi({
+      calls: calls.length,
+      injected: injected.length,
+      usedEvents: creditedUses,
+      totalOverheadTokens: totalInjectedTokens + totalInternalTokens,
+      avgContextOverheadPct,
+    }),
     phases: Object.entries(groupByPhase(calls)).map(([phase, rows]) => ({
       phase,
       calls: rows.length,

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { countCreditedTriggerInjections, triggerEfficiencyKpi } from './trigger-efficiency.js';
 
 // Pure-ish metrics aggregation over the private state that the CLI already
 // records. Keeps src/cli.js thin: cli.js only wires the command and passes a
@@ -104,6 +105,7 @@ export function summarizeMemory(events, bounds) {
   const promoted = scoped.filter((event) => event.type === 'memory.promoted');
   const pruned = scoped.filter((event) => event.type === 'memory.pruned');
   const patterns = scoped.filter((event) => event.type === 'pattern.suggested');
+  const used = scoped.filter((event) => event.type === 'memory.used');
   const candidateCount = candidates.length;
   return {
     candidatesCreated: candidateCount,
@@ -112,6 +114,8 @@ export function summarizeMemory(events, bounds) {
     promotedByKind: tallyBy(promoted, 'kind'),
     pruned: pruned.length,
     patternsSuggested: patterns.length,
+    usedEvents: used.length,
+    usedKeys: used.map((event) => event.key).filter(Boolean),
     conversionRate: candidateCount ? promoted.length / candidateCount : 0,
   };
 }
@@ -132,13 +136,17 @@ export function summarizeRecall(events) {
   };
 }
 
-export function summarizeMemoryTriggers(events) {
+export function summarizeMemoryTriggers(events, memory = {}) {
   const calls = events.filter((event) => event.source === 'memory.trigger');
   const injected = calls.filter((event) => Number(event.injected) > 0);
   const skipped = calls.filter((event) => event.skipped);
   const injectedTokens = calls.map((event) => Number(event.tokens?.injectedTokens) || 0);
   const internalTokens = calls.map((event) => Number(event.tokens?.totalInternalTokens) || 0);
   const contextOverhead = calls.map((event) => Number(event.tokens?.contextOverheadPct) || 0);
+  const totalInjectedTokens = injectedTokens.reduce((sum, value) => sum + value, 0);
+  const totalInternalTokens = internalTokens.reduce((sum, value) => sum + value, 0);
+  const avgContextOverheadPct = average(contextOverhead);
+  const creditedUses = countCreditedTriggerInjections(calls, memory.usedKeys);
   return {
     calls: calls.length,
     injected: injected.length,
@@ -147,10 +155,17 @@ export function summarizeMemoryTriggers(events) {
     byProvider: tallyBy(calls, 'provider'),
     avgInjectedTokens: average(injectedTokens),
     p95InjectedTokens: percentile(injectedTokens, 0.95),
-    totalInjectedTokens: injectedTokens.reduce((sum, value) => sum + value, 0),
+    totalInjectedTokens,
     avgInternalTokens: average(internalTokens),
-    avgContextOverheadPct: average(contextOverhead),
+    avgContextOverheadPct,
     maxContextOverheadPct: contextOverhead.length ? Math.max(...contextOverhead) : 0,
+    efficiencyKpi: triggerEfficiencyKpi({
+      calls: calls.length,
+      injected: injected.length,
+      usedEvents: creditedUses,
+      totalOverheadTokens: totalInjectedTokens + totalInternalTokens,
+      avgContextOverheadPct,
+    }),
   };
 }
 
@@ -280,6 +295,7 @@ function dateString(date) {
 export function collectStats(home, referenceDate, since = '7d') {
   const bounds = windowBounds(referenceDate, since);
   const memoryEvents = readMemoryEvents(home);
+  const memory = summarizeMemory(memoryEvents, bounds);
   return {
     window: bounds,
     hooks: summarizeHooks(readRuntimeEvents(home, 'hooks', bounds)),
@@ -288,9 +304,9 @@ export function collectStats(home, referenceDate, since = '7d') {
       ...readRuntimeEvents(home, 'hooks', bounds),
       ...readRuntimeEvents(home, 'schedule', bounds),
     ]),
-    memory: summarizeMemory(memoryEvents, bounds),
+    memory,
     recall: summarizeRecall(readRuntimeEvents(home, 'recall', bounds)),
-    memoryTrigger: summarizeMemoryTriggers(readRuntimeEvents(home, 'memory-trigger', bounds)),
+    memoryTrigger: summarizeMemoryTriggers(readRuntimeEvents(home, 'memory-trigger', bounds), memory),
     activity: summarizeActivity(home, bounds),
     storage: summarizeStorage(home),
   };

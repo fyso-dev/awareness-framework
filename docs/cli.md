@@ -294,7 +294,7 @@ Reported metrics:
 - **Scheduled runs** — counts by cadence and the warnings trend (from `runtime/schedule`).
 - **Memory** — candidates created (by source), promotions (by kind), prunes, and pattern suggestions (from `memory/events.jsonl`).
 - **Recall (hits)** — calls, average results per call, zero-result queries, repeated zero-result queries, and the most frequent queries and matched files (from `runtime/recall`).
-- **Memory Trigger** — AI trigger calls, injected/skipped decisions, phase/provider breakdown, injected token totals, internal decision token estimates, and context overhead percentage.
+- **Memory Trigger** — AI trigger calls, injected/skipped decisions, phase/provider breakdown, an efficiency KPI, injected token totals, internal decision token estimates, and context overhead percentage. The KPI stays in `learning` until useful injected memory is credited with `awareness memory used`; after that it scores credited injection rate against context overhead.
 - **Activity** — worklog entries, distinct tasks, and distinct repositories in the window (from `worklog/*.md`).
 - **Storage** — file count and bytes per area, computed on demand.
 
