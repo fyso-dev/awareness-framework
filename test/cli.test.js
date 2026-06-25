@@ -30,6 +30,26 @@ function repoRootForTests() {
   return path.resolve(new URL('..', import.meta.url).pathname);
 }
 
+function seedReleaseTrigger(home) {
+  run([
+    'memory', 'promote',
+    '--kind', 'project',
+    '--text', 'Use release guardrails before publishing.',
+    '--evidence', 'release convention',
+  ], home);
+  run(['memory', 'trigger', '--phase', 'pre-action', '--action', 'publish'], home, {
+    AWARENESS_MEMORY_TRIGGER_DECISION_JSON: JSON.stringify({
+      shouldRecall: true,
+      confidence: 0.9,
+      intent: 'release guardrails publishing',
+      reason: 'Release action can benefit from project memory.',
+      risk: 'high',
+      model: 'test-ai',
+    }),
+    AWARENESS_CONTEXT_BUDGET_TOKENS: '1000',
+  });
+}
+
 test('init creates private awareness files', () => {
   const home = tempHome();
   const result = run(['init'], home);
@@ -1130,7 +1150,61 @@ test('memory trigger injects AI-selected memories and records token overhead', (
   assert.equal(stats.code, 0);
   assert.match(stats.stdout, /Trigger Funnel/);
   assert.match(stats.stdout, /Trigger Token Overhead/);
+  assert.match(stats.stdout, /Efficiency KPI: learning/);
   assert.match(stats.stdout, /Injected: 1/);
+
+  const statsJson = run(['memory', 'stats', '--since', 'all', '--json'], home);
+  const parsedStats = JSON.parse(statsJson.stdout);
+  assert.equal(parsedStats.trigger.efficiencyKpi.status, 'learning');
+  assert.equal(parsedStats.trigger.efficiencyKpi.score, null);
+});
+
+test('memory trigger efficiency KPI scores credited injected memory', () => {
+  const home = tempHome();
+  run(['init'], home);
+  seedReleaseTrigger(home);
+  run([
+    'memory', 'used',
+    '--text', 'Use release guardrails before publishing.',
+    '--note', 'The injected release memory changed the next step.',
+  ], home);
+
+  const result = run(['memory', 'stats', '--since', 'all'], home);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Efficiency KPI: good/);
+  assert.match(result.stdout, /credited 100% of injections/);
+
+  const json = run(['memory', 'stats', '--since', 'all', '--json'], home);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.trigger.efficiencyKpi.status, 'good');
+  assert.equal(parsed.trigger.efficiencyKpi.score >= 80, true);
+  assert.equal(parsed.trigger.efficiencyKpi.creditedInjectionRate, 1);
+  assert.equal(typeof parsed.trigger.efficiencyKpi.tokensPerCreditedUse, 'number');
+});
+
+test('memory trigger efficiency KPI ignores unrelated memory used credits', () => {
+  const home = tempHome();
+  run(['init'], home);
+  seedReleaseTrigger(home);
+  run([
+    'memory', 'promote',
+    '--kind', 'preference',
+    '--text', 'Prefer ripgrep over grep.',
+    '--evidence', 'tooling convention',
+  ], home);
+  run([
+    'memory', 'used',
+    '--text', 'Prefer ripgrep over grep.',
+    '--note', 'Useful but not injected by memory trigger.',
+  ], home);
+
+  const json = run(['memory', 'stats', '--since', 'all', '--json'], home);
+  const parsed = JSON.parse(json.stdout);
+
+  assert.equal(parsed.outcome.usedEvents, 1);
+  assert.equal(parsed.trigger.efficiencyKpi.status, 'learning');
+  assert.equal(parsed.trigger.efficiencyKpi.creditedUses, 0);
 });
 
 test('memory trigger only retrieves active curated long-term memory sections', () => {
@@ -1474,23 +1548,7 @@ test('stats surfaces pending private template updates', () => {
 test('stats aggregates memory trigger token overhead', () => {
   const home = tempHome();
   run(['init'], home);
-  run([
-    'memory', 'promote',
-    '--kind', 'project',
-    '--text', 'Use release guardrails before publishing.',
-    '--evidence', 'release convention',
-  ], home);
-  run(['memory', 'trigger', '--phase', 'pre-action', '--action', 'publish'], home, {
-    AWARENESS_MEMORY_TRIGGER_DECISION_JSON: JSON.stringify({
-      shouldRecall: true,
-      confidence: 0.9,
-      intent: 'release guardrails publishing',
-      reason: 'Release action can benefit from project memory.',
-      risk: 'high',
-      model: 'test-ai',
-    }),
-    AWARENESS_CONTEXT_BUDGET_TOKENS: '1000',
-  });
+  seedReleaseTrigger(home);
 
   const result = run(['stats', '--since', 'all'], home);
 
@@ -1498,6 +1556,7 @@ test('stats aggregates memory trigger token overhead', () => {
   assert.match(result.stdout, /Memory Trigger/);
   assert.match(result.stdout, /Calls: 1/);
   assert.match(result.stdout, /Injected\/skipped: 1\/0/);
+  assert.match(result.stdout, /Efficiency KPI: learning/);
   assert.match(result.stdout, /Avg context overhead:/);
 
   const json = run(['stats', '--since', 'all', '--json'], home);
@@ -1505,6 +1564,7 @@ test('stats aggregates memory trigger token overhead', () => {
   assert.equal(parsed.memoryTrigger.calls, 1);
   assert.equal(parsed.memoryTrigger.injected, 1);
   assert.ok(parsed.memoryTrigger.totalInjectedTokens > 0);
+  assert.equal(parsed.memoryTrigger.efficiencyKpi.status, 'learning');
 });
 
 test('stats supports JSON output and snapshot persistence', () => {

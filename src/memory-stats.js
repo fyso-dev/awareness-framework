@@ -1,3 +1,5 @@
+import { formatTriggerEfficiencyKpi } from './trigger-efficiency.js';
+
 export function renderMemoryStatsJson(metrics) {
   return JSON.stringify(metrics, null, 2);
 }
@@ -56,6 +58,7 @@ export function renderMemoryStatsText(metrics) {
     `- Injected: ${metrics.trigger.funnel.injected} (${formatPercent(metrics.trigger.funnel.injectionRate)})`,
     `- Skipped: ${metrics.trigger.funnel.skipped}`,
     `- Skip reasons: ${formatCounts(metrics.trigger.funnel.skipReasons)}`,
+    `- Efficiency KPI: ${formatTriggerEfficiencyKpi(metrics.trigger.efficiencyKpi)}`,
     '',
     'Trigger Token Overhead',
     `- Injected context tokens: ${metrics.trigger.tokens.totalInjectedTokens} total, ${formatNumber(metrics.trigger.tokens.avgInjectedTokens)}/call`,
