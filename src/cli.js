@@ -12,7 +12,7 @@ import {
 } from './memory-candidates.js';
 import { recallTermGroups, trimEdgeChar } from './text.js';
 import { searchDocuments } from './search.js';
-import { collectStats, isValidWindow } from './metrics.js';
+import { collectStats, isValidWindow, readRuntimeEvents, windowBounds } from './metrics.js';
 import { renderStatsJson, renderStatsText } from './stats.js';
 import {
   collectMemoryMetrics,
@@ -153,6 +153,7 @@ Usage:
   awareness memory used (--text TEXT | --key KEY) [--note TEXT] [--home PATH]
   awareness memory stats [--since today|7d|30d|all] [--json] [--snapshot] [--home PATH]
   awareness memory trigger --phase PHASE [--text TEXT] [--action TEXT] [--json] [--home PATH]
+  awareness memory debug [--since today|7d|30d|all] [--last N] [--json] [--watch] [--interval MS] [--home PATH]
   awareness remember --text TEXT --evidence TEXT [--home PATH]
   awareness recall QUERY [--limit N] [--home PATH]
   awareness stats [--since today|7d|30d|all] [--json] [--snapshot] [--home PATH]
@@ -438,9 +439,11 @@ function memoryCommand(ctx, subcommand, opts) {
       return memoryStatsCommand(ctx, home, opts);
     case 'trigger':
       return memoryTriggerCommand(ctx, home, opts);
+    case 'debug':
+      return memoryDebugCommand(ctx, home, opts);
     default:
       err(ctx, `Unknown memory command: ${subcommand}`);
-      err(ctx, 'Use: candidates, show, review, note, promote, used, stats, or trigger.');
+      err(ctx, 'Use: candidates, show, review, note, promote, used, stats, trigger, or debug.');
       return 1;
   }
 }
@@ -627,8 +630,101 @@ function memoryTriggerCommand(ctx, home, opts) {
   return 0;
 }
 
+function memoryDebugCommand(ctx, home, opts) {
+  const since = opts.since || 'today';
+  if (!isValidWindow(since)) {
+    throw new Error(`Invalid --since: ${since}. Valid windows: today, 7d, 30d, all`);
+  }
+  const limit = Number.parseInt(opts.last || '10', 10);
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('Invalid --last. Use an integer >= 1.');
+  }
+  const intervalMs = Number.parseInt(opts.interval || '1000', 10);
+  if (!Number.isInteger(intervalMs) || intervalMs < 250) {
+    throw new Error('Invalid --interval. Use an integer >= 250 milliseconds.');
+  }
+
+  const events = memoryDebugEvents(home, referenceNow(ctx), since);
+
+  if (opts.json) {
+    out(ctx, JSON.stringify(events.slice(-limit), null, 2));
+    return 0;
+  }
+
+  out(ctx, `Memory Debug (${since}, last ${limit})`);
+  renderMemoryDebugEvents(ctx, events.slice(-limit));
+  if (opts.watch) {
+    out(ctx, '');
+    out(ctx, `Watching memory debug every ${intervalMs}ms. Press Ctrl-C to stop.`);
+    watchMemoryDebug(ctx, home, since, intervalMs, events.length);
+  }
+  return 0;
+}
+
+function memoryDebugEvents(home, referenceDate, since) {
+  const bounds = windowBounds(referenceDate, since);
+  return readRuntimeEvents(home, 'memory-debug', bounds)
+    .filter((event) => event.source === 'memory.debug');
+}
+
+function renderMemoryDebugEvents(ctx, events) {
+  if (!events.length) {
+    out(ctx, '- No memory debug events recorded.');
+    return;
+  }
+  for (const event of events) {
+    renderMemoryDebugEvent(ctx, event);
+  }
+}
+
+function renderMemoryDebugEvent(ctx, event) {
+  out(ctx, '');
+  out(ctx, `${event.timestamp} - ${event.phase} - ${event.level}`);
+  out(ctx, `- Input: ${formatDebugInput(event.input)}`);
+  out(ctx, `- Deduction: ${event.decision.shouldRecall ? 'recall' : 'skip'} confidence=${formatPercent(event.decision.confidence)} intent="${event.decision.intent || ''}"`);
+  out(ctx, `- Reason: ${event.decision.reason || event.skipReason || 'n/a'}`);
+  out(ctx, `- Retrieved: ${event.retrieval.candidateCount} candidate(s) for "${event.retrieval.query || ''}"`);
+  out(ctx, `- Injected: ${event.injection.injected ? 'yes' : 'no'} (${event.injection.keys.length} key(s), ${event.tokens.injectedTokens} tokens)`);
+  for (const item of event.injection.memories || []) {
+    out(ctx, `  - ${item.key}: ${truncateForDisplay(item.text, 120)}`);
+  }
+  if (event.level === 'full') {
+    out(ctx, `- Full transcript: context=${estimateDebugChars(event.transcript?.context)} chars, candidates=${event.transcript?.candidates?.length || 0}`);
+  }
+}
+
+function watchMemoryDebug(ctx, home, since, intervalMs, seen) {
+  setInterval(() => {
+    const events = memoryDebugEvents(home, referenceNow(ctx), since);
+    const next = events.slice(seen);
+    seen = events.length;
+    for (const event of next) renderMemoryDebugEvent(ctx, event);
+  }, intervalMs);
+}
+
 function formatTriggerProvider(trigger) {
   return trigger.model ? `${trigger.provider}/${trigger.model}` : trigger.provider;
+}
+
+function formatDebugInput(input = {}) {
+  const parts = [];
+  if (input.text) parts.push(`text="${truncateForDisplay(input.text, 80)}"`);
+  if (input.action) parts.push(`action="${truncateForDisplay(input.action, 80)}"`);
+  if (input.focus) parts.push(`focus="${truncateForDisplay(input.focus.replace(/\s+/g, ' '), 80)}"`);
+  return parts.length ? parts.join(', ') : 'none';
+}
+
+function formatPercent(value) {
+  return `${Math.round((Number(value) || 0) * 100)}%`;
+}
+
+function truncateForDisplay(text, limit) {
+  const value = String(text || '');
+  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+function estimateDebugChars(value) {
+  return JSON.stringify(value || {}).length;
 }
 
 function memoryPromotionSection(kind) {
@@ -968,7 +1064,80 @@ function runAndRecordMemoryTrigger(ctx, home, { phase, text = '', action = '' })
     tokens: trigger.tokens,
     durationMs: trigger.durationMs,
   });
+  appendMemoryDebugEvent(ctx, home, trigger, { text, action, focus });
   return trigger;
+}
+
+function appendMemoryDebugEvent(ctx, home, trigger, input) {
+  const level = memoryDebugLevel(ctx.env);
+  if (level === 'off') return;
+
+  appendRuntimeEvent(home, todayParts(ctx), 'memory-debug', memoryDebugRecord(home, trigger, input, level));
+}
+
+function memoryDebugLevel(env) {
+  const value = String(env.AWARENESS_MEMORY_DEBUG || '').toLowerCase();
+  if (value === '1' || value === 'true') return 'full';
+  if (value === 'summary' || value === 'full') return value;
+  return 'off';
+}
+
+function memoryDebugRecord(home, trigger, input, level) {
+  const base = {
+    source: 'memory.debug',
+    level,
+    phase: trigger.phase,
+    input: {
+      text: input.text,
+      action: input.action,
+      focus: input.focus,
+    },
+    decision: {
+      shouldRecall: trigger.shouldRecall,
+      confidence: trigger.confidence,
+      intent: trigger.intent,
+      reason: trigger.reason,
+      risk: trigger.risk,
+      provider: trigger.provider,
+      model: trigger.model,
+    },
+    skipReason: trigger.skipReason,
+    retrieval: {
+      query: trigger.query,
+      candidateCount: trigger.candidates,
+      candidates: trigger.candidateMemories.map((candidate) => debugMemoryItem(home, candidate)),
+    },
+    injection: {
+      injected: Boolean(trigger.injectedText),
+      keys: trigger.injectedMemories.map((memory) => memory.key),
+      memories: trigger.injectedMemories.map((memory) => debugMemoryItem(home, memory)),
+      text: trigger.injectedText,
+    },
+    tokens: trigger.tokens,
+    durationMs: trigger.durationMs,
+  };
+
+  if (level === 'full') {
+    base.transcript = {
+      context: trigger.debug.context,
+      decision: trigger.debug.decision,
+      candidates: trigger.candidateMemories,
+      injectedText: trigger.injectedText,
+    };
+  }
+
+  return base;
+}
+
+function debugMemoryItem(home, memory) {
+  return {
+    key: memory.key,
+    file: displayPath(home, memory.file),
+    line: memory.line,
+    score: memory.score,
+    text: memory.text,
+    why: memory.why || '',
+  };
 }
 
 // Print the Current Focus as injectable context for the host agent. Framed as

@@ -248,6 +248,16 @@ Valid promotion kinds are `preference`, `pattern`, `project`, and `review`.
 
 If no provider is configured, the trigger records a skipped decision instead of guessing from keywords and does not charge internal decision tokens. Provider calls are bounded by `AWARENESS_MEMORY_TRIGGER_TIMEOUT_MS` (default `3000`) and fail closed as skipped decisions. Trigger output is token-accounted: internal decision/retrieval tokens are separated from injected context tokens, and context overhead is computed against `AWARENESS_CONTEXT_BUDGET_TOKENS` (default `128000`). Retrieval injects only curated long-term memory sections plus recent worklog context, so inactive promotion candidates and pruned audit entries are not resurrected as durable memory.
 
+`memory debug` reads optional trigger debug traces from `runtime/memory-debug/YYYY-MM-DD.jsonl`. Debug logging is off by default. Set `AWARENESS_MEMORY_DEBUG=summary` to record input, deduction, retrieval candidates, injected keys/text, and token accounting. Set `AWARENESS_MEMORY_DEBUG=full` (or `1`) to also store the full provider transcript context: phase, text/action, current focus, current context, bounded long-term memory, recent worklog text, raw provider decision, candidate list, and injected context. Full debug can contain private transcript and memory content, so use it intentionally and keep it local.
+
+```bash
+AWARENESS_MEMORY_DEBUG=summary awareness memory trigger --phase message --text "how do we publish this?"
+AWARENESS_MEMORY_DEBUG=full awareness memory trigger --phase pre-action --action "npm publish"
+awareness memory debug --since today
+awareness memory debug --last 5 --json
+awareness memory debug --watch --interval 1000
+```
+
 Reported levels:
 
 - **Store health** — conversion from candidates to durable memory, source mix, churn, density, and freshness indicators.

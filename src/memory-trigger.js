@@ -52,9 +52,15 @@ export function runMemoryTrigger({ home, ctx, phase, text = '', action = '', foc
     reason: decision.reason || '',
     intent: decision.intent || '',
     risk: decision.risk || 'unknown',
+    query: decision.intent || text || action || focus,
     candidates: candidates.length,
+    candidateMemories: candidates,
     injectedMemories: selected,
     injectedText,
+    debug: {
+      context,
+      decision: decision.raw || decision,
+    },
     tokens: {
       decisionTokensIn,
       decisionTokensOut,
