@@ -93,6 +93,16 @@ function decideMemoryTrigger(env, context) {
   const fixture = env.AWARENESS_MEMORY_TRIGGER_DECISION_JSON;
   if (fixture) return normalizeDecision(parseJson(fixture, 'AWARENESS_MEMORY_TRIGGER_DECISION_JSON'), 'fixture');
 
+  if (env.AWARENESS_MEMORY_TRIGGER_RUNNING) {
+    return normalizeDecision({
+      shouldRecall: false,
+      confidence: 0,
+      reason: 'trigger already running (recursion guard)',
+      intent: '',
+      risk: 'unknown',
+    }, 'none');
+  }
+
   const command = env.AWARENESS_MEMORY_TRIGGER_COMMAND;
   if (!command) {
     return normalizeDecision({
