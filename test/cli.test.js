@@ -1538,6 +1538,62 @@ test('hook install pins scoped homes into generated commands', () => {
   assert.doesNotMatch(codexHooks.hooks.SessionStart[0].hooks[0].command, /users\/alice/);
 });
 
+test('memory setup installs awareness-trigger script with default auto provider', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['memory', 'setup'], home);
+
+  assert.equal(result.code, 0);
+  const scriptPath = path.join(path.dirname(home), 'bin', 'awareness-trigger');
+  assert.ok(fs.existsSync(scriptPath), 'awareness-trigger script should exist');
+  const content = fs.readFileSync(scriptPath, 'utf8');
+  assert.match(content, /claude/);
+  assert.match(content, /codex/);
+  assert.match(content, /opencode/);
+  assert.match(content, /AWARENESS_MEMORY_TRIGGER_RUNNING/);
+  assert.match(result.stdout, /Installed:/);
+  assert.match(result.stdout, /AWARENESS_MEMORY_TRIGGER_COMMAND/);
+});
+
+test('memory setup respects --provider flag and sets PROVIDERS to that provider only', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['memory', 'setup', '--provider', 'claude'], home);
+
+  assert.equal(result.code, 0);
+  const scriptPath = path.join(path.dirname(home), 'bin', 'awareness-trigger');
+  const content = fs.readFileSync(scriptPath, 'utf8');
+  assert.match(content, /PROVIDERS = \["claude"\]/);
+  assert.doesNotMatch(content, /PROVIDERS = \[.*codex/);
+});
+
+test('memory setup rejects invalid --provider', () => {
+  const home = tempHome();
+  run(['init'], home);
+
+  const result = run(['memory', 'setup', '--provider', 'gpt5'], home);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Invalid --provider/);
+});
+
+test('memory trigger skips when AWARENESS_MEMORY_TRIGGER_RUNNING is set', () => {
+  const home = tempHome();
+  run(['init'], home);
+  seedReleaseTrigger(home);
+
+  const result = run(['memory', 'trigger', '--phase', 'session-start', '--json'], home, {
+    AWARENESS_MEMORY_TRIGGER_COMMAND: '/usr/bin/true',
+    AWARENESS_MEMORY_TRIGGER_RUNNING: '1',
+  });
+
+  assert.equal(result.code, 0);
+  const parsed = JSON.parse(result.stdout.trim());
+  assert.equal(parsed.skipReason, 'trigger already running (recursion guard)');
+});
+
 test('schedule run daily writes runtime event and daily evaluation', () => {
   const home = tempHome();
   run(['init'], home);
