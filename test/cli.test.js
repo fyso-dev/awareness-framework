@@ -10,9 +10,11 @@ import { searchDocuments } from '../src/search.js';
 function run(argv, home, env = {}) {
   let stdout = '';
   let stderr = '';
+  const inherited = { ...process.env };
+  delete inherited.AWARENESS_MEMORY_DEBUG;
   const code = runCli([...argv, '--home', home], {
     env: {
-      ...process.env,
+      ...inherited,
       AWARENESS_NOW: '2099-01-02T12:34:00.000Z',
       ...env,
     },
