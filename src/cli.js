@@ -993,7 +993,7 @@ function hookCommand(ctx, subcommand, opts) {
 // Events whose stdout the host agent injects into its context. For these we
 // always emit the Current Focus so the agent actually loads the protocol state,
 // even under --quiet (which only suppresses diagnostic noise, not the payload).
-const CONTEXT_INJECTION_EVENTS = new Set(['session-start', 'post-compact']);
+const CONTEXT_INJECTION_EVENTS = new Set(['session-start', 'post-compact', 'user-prompt']);
 
 function hookRunCommand(ctx, opts) {
   const home = agentsHome(ctx, opts);
@@ -1017,8 +1017,12 @@ function hookRunCommand(ctx, opts) {
   }
 
   if (CONTEXT_INJECTION_EVENTS.has(event)) {
-    emitFocusContext(ctx, home);
-    emitTriggeredMemory(ctx, home, event, tool);
+    if (event === 'user-prompt') {
+      emitFocusContextAsAdditionalContext(ctx, home);
+    } else {
+      emitFocusContext(ctx, home);
+      emitTriggeredMemory(ctx, home, event, tool);
+    }
   }
 
   return 0;
@@ -1152,6 +1156,24 @@ function emitFocusContext(ctx, home) {
   out(ctx, focus);
   out(ctx, '');
   out(ctx, 'Follow the awareness protocol; run `awareness handoff` before yielding control.');
+}
+
+function emitFocusContextAsAdditionalContext(ctx, home) {
+  const focusText = currentFocusText(home);
+  let msg;
+  if (focusText) {
+    const task = metadataValue(focusText, 'Task') || '';
+    const summary = metadataValue(focusText, 'Summary') || '';
+    const taskPart = task ? `${task} — ${summary}` : summary;
+    const logPart = task
+      ? `usa 'awareness log --task ${task} --summary TEXT --changes TEXT' para registrar trabajo, y 'awareness handoff' antes de responder.`
+      : "usa 'awareness log' y 'awareness handoff' antes de responder.";
+    msg = `[awareness] Focus: ${taskPart}. OBLIGATORIO: ${logPart}`;
+  } else {
+    msg = "[awareness] Sin foco activo. Usá 'awareness focus', 'awareness log' y 'awareness handoff' antes de responder.";
+  }
+  const escaped = msg.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  out(ctx, `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"${escaped}"}}`);
 }
 
 function currentFocusText(home) {
@@ -1325,6 +1347,7 @@ function installClaudeHooks(userHome, command, home) {
   addCommandHook(data, 'SessionEnd', hookShellCommand(command, 'claude', 'session-end', home), 'clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other', 'Recording session end');
   addCommandHook(data, 'PreCompact', hookShellCommand(command, 'claude', 'pre-compact', home), 'manual|auto', 'Recording pre-compact state');
   addCommandHook(data, 'PostCompact', hookShellCommand(command, 'claude', 'post-compact', home), 'manual|auto', 'Recording post-compact state');
+  addCommandHook(data, 'UserPromptSubmit', hookShellCommand(command, 'claude', 'user-prompt', home), '', 'Loading awareness context');
   writeJsonObject(file, data);
   return file;
 }

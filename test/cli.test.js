@@ -1449,6 +1449,41 @@ test('hook run does not emit focus context on non-injection events', () => {
   assert.doesNotMatch(result.stdout, /\[awareness\] Load this before doing work/);
 });
 
+test('hook run emits additionalContext JSON on user-prompt when focus is active', () => {
+  const home = tempHome();
+  run(['init'], home);
+  run(['focus',
+    '--task', 'ETP-9',
+    '--summary', 'Implement stress tests',
+    '--repo', 'schema-forge',
+    '--branch', 'feature/ETP-9',
+    '--next', 'Write runner.js',
+  ], home);
+
+  const result = run(['hook', 'run', '--tool', 'claude', '--event', 'user-prompt', '--quiet'], home);
+
+  assert.equal(result.code, 0);
+  const parsed = JSON.parse(result.stdout.trim());
+  assert.equal(parsed.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  assert.match(parsed.hookSpecificOutput.additionalContext, /ETP-9/);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /awareness log/);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /awareness handoff/);
+});
+
+test('hook run emits additionalContext JSON on user-prompt even with default Unassigned focus', () => {
+  const home = tempHome();
+  run(['init'], home);
+  // After init, the focus is "Unassigned" — no real task set yet
+
+  const result = run(['hook', 'run', '--tool', 'claude', '--event', 'user-prompt', '--quiet'], home);
+
+  assert.equal(result.code, 0);
+  const parsed = JSON.parse(result.stdout.trim());
+  assert.equal(parsed.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  assert.match(parsed.hookSpecificOutput.additionalContext, /\[awareness\]/);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /awareness log/);
+});
+
 test('hook install writes Codex, Claude, and OpenCode integration files', () => {
   const home = tempHome();
   const userHome = tempHome();
@@ -1472,6 +1507,8 @@ test('hook install writes Codex, Claude, and OpenCode integration files', () => 
 
   const claudeSettings = JSON.parse(fs.readFileSync(path.join(userHome, '.claude', 'settings.json'), 'utf8'));
   assert.match(claudeSettings.hooks.SessionEnd[0].hooks[0].command, /--tool claude/);
+  assert.ok(claudeSettings.hooks.UserPromptSubmit, 'UserPromptSubmit hook should be installed');
+  assert.match(claudeSettings.hooks.UserPromptSubmit[0].hooks[0].command, /--event user-prompt/);
 
   const plugin = fs.readFileSync(path.join(configHome, 'opencode', 'plugins', 'awareness-framework.js'), 'utf8');
   assert.match(plugin, /Awareness Framework generated plugin/);
