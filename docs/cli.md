@@ -129,11 +129,33 @@ Use this after upgrading the CLI when templates gained new guidance, or run `awa
 
 ### `status`
 
-Shows the current focus and warnings. Warnings are printed but do not make the command fail; use `awareness check --strict` when automation should fail on warnings.
+Shows the current focus, the detected session context, and warnings. Warnings are printed but do not make the command fail; use `awareness check --strict` when automation should fail on warnings.
 
 ```bash
 awareness status
 ```
+
+`Session Context` is derived from git in the working directory (`owner/name` from the `origin` remote when present, otherwise the worktree directory name, plus the current branch). It is never written back over `Current Focus`.
+
+When the two disagree, `status` says so instead of asserting the stored value:
+
+```text
+Current Focus
+- Task: ETENDORX-BUILD-SPEED
+- Repository: etendo_rx
+- Branch: feat-speed
+
+Session Context
+- Repository: fyso-dev/awareness-framework
+- Branch: main
+- Note: Current Focus (etendo_rx / feat-speed) diverges from session context (fyso-dev/awareness-framework / main).
+```
+
+Repositories are compared on the trailing path segment, so `fyso/ingest` and `fyso-dev/ingest` count as the same repo. Outside a git worktree no session context is shown and no divergence is claimed.
+
+The same divergence notice is added to the context that `hook run` injects at session start and on each user prompt, so an agent is told the stored focus may not apply rather than adopting it silently.
+
+A `Setup` section lists environment gaps (for example, an unconfigured memory trigger). These are kept separate from board warnings and never feed the evaluation diagnostics that generate memory promotion candidates.
 
 ### `refresh`
 
@@ -170,9 +192,13 @@ awareness focus \
 
 Valid states are `started`, `in-progress`, `paused`, `blocked`, `waiting`, `done`, `in-review`, and `ready`. Underscore aliases such as `in_progress` and `in_review` are accepted and normalized.
 
+`--repo` and `--branch` default to the detected git context, so they can be omitted inside a worktree. Explicit flags always win. Outside a git worktree they fall back to `Unspecified`.
+
+A task block records `Done` only when real work has been logged against it, and existing `Done` entries survive later focus switches.
+
 ### `log`
 
-Appends a concrete progress entry to the daily worklog.
+Appends a concrete progress entry to the daily worklog, and appends `--changes` to the matching task's `Done` list on the board. If no task block matches, the board is left untouched rather than inventing one.
 
 ```bash
 awareness log \
@@ -181,6 +207,17 @@ awareness log \
   --changes "Implemented init, status, check, focus, log, handoff, evaluate, and personality commands." \
   --evidence "src/cli.js"
 ```
+
+### `archive`
+
+Retires `State: done` task blocks from `Active Tasks` into `awareness/archive/YYYY-MM.md`, keeping the board (which is injected into every session) down to work that is actually live.
+
+```bash
+awareness archive --dry-run
+awareness archive
+```
+
+The task named by `Current Focus` is never retired, even when done: removing it would leave the focus pointing at a task with no detail on the board.
 
 ### `handoff`
 
@@ -233,7 +270,11 @@ Valid promotion kinds are `preference`, `pattern`, `project`, and `review`.
 
 `memory stats` summarizes whether stored memory is healthy, utilized, and useful. The command accepts `--since today`, `--since 7d`, `--since 30d`, or `--since all`, prints text by default, emits machine-readable JSON with `--json`, and appends the aggregate snapshot to `runtime/metrics/YYYY-MM-DD.jsonl` with `--snapshot`.
 
-`memory trigger` asks a configured AI trigger provider whether the current phase/action/message should recall local memory. It does not use keyword rules. Configure `AWARENESS_MEMORY_TRIGGER_COMMAND` with an executable that reads a JSON context from stdin and returns JSON:
+`memory trigger` asks a configured AI trigger provider whether the current phase/action/message should recall local memory. It does not use keyword rules.
+
+The provider is resolved from `AWARENESS_MEMORY_TRIGGER_COMMAND` first, then from `memoryTriggerCommand` in `<home>/config.json`. `awareness memory setup` writes that config entry, so the trigger is active immediately without a shell-profile change; the environment variable still overrides it per shell. Until a provider is resolved, recall never runs — `status` and `check` report this under `Setup`, and `stats` counts those calls as `provider not configured` rather than as evaluations, so a disabled trigger does not read as "evaluated and found nothing useful".
+
+The executable reads a JSON context from stdin and returns JSON:
 
 ```json
 {

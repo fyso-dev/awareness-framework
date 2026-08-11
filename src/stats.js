@@ -43,7 +43,7 @@ export function renderStatsText(stats) {
     `- Top files: ${formatRanked(stats.recall.topFiles)}`,
     '',
     'Memory Trigger',
-    `- Calls: ${stats.memoryTrigger.calls}`,
+    `- Calls: ${stats.memoryTrigger.calls} (${stats.memoryTrigger.evaluated} evaluated, ${stats.memoryTrigger.unconfigured} skipped: provider not configured)`,
     `- Injected/skipped: ${stats.memoryTrigger.injected}/${stats.memoryTrigger.skipped}`,
     `- By phase: ${formatCounts(stats.memoryTrigger.byPhase)}`,
     `- By provider: ${formatCounts(stats.memoryTrigger.byProvider)}`,

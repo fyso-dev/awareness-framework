@@ -140,6 +140,9 @@ export function summarizeMemoryTriggers(events, memory = {}) {
   const calls = events.filter((event) => event.source === 'memory.trigger');
   const injected = calls.filter((event) => Number(event.injected) > 0);
   const skipped = calls.filter((event) => event.skipped);
+  // A call on an unconfigured provider is not an evaluation: nothing decided.
+  // Counting them as evaluations reads as "tried and found nothing useful".
+  const unconfigured = calls.filter((event) => event.configured === false);
   const injectedTokens = calls.map((event) => Number(event.tokens?.injectedTokens) || 0);
   const internalTokens = calls.map((event) => Number(event.tokens?.totalInternalTokens) || 0);
   const contextOverhead = calls.map((event) => Number(event.tokens?.contextOverheadPct) || 0);
@@ -149,6 +152,8 @@ export function summarizeMemoryTriggers(events, memory = {}) {
   const creditedUses = countCreditedTriggerInjections(calls, memory.usedKeys);
   return {
     calls: calls.length,
+    evaluated: calls.length - unconfigured.length,
+    unconfigured: unconfigured.length,
     injected: injected.length,
     skipped: skipped.length,
     byPhase: tallyBy(calls, 'phase'),

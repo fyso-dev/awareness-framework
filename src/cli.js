@@ -10,6 +10,7 @@ import {
   memoryCandidateTextExists,
   repeatedMemoryCandidateSuggestions,
 } from './memory-candidates.js';
+import { detectGitContext } from './git-context.js';
 import { recallTermGroups, trimEdgeChar } from './text.js';
 import { searchDocuments } from './search.js';
 import { collectStats, isValidWindow, readRuntimeEvents, windowBounds } from './metrics.js';
@@ -20,7 +21,7 @@ import {
   parseCuratedEntries,
 } from './memory-metrics.js';
 import { renderMemoryStatsJson, renderMemoryStatsText } from './memory-stats.js';
-import { runMemoryTrigger } from './memory-trigger.js';
+import { resolveTriggerCommand, runMemoryTrigger } from './memory-trigger.js';
 
 const VALID_STATES = new Set(['started', 'in-progress', 'paused', 'blocked', 'waiting', 'done', 'in-review', 'ready']);
 const DEFAULT_STATE = 'in-progress';
@@ -34,6 +35,7 @@ const repoRoot = path.resolve(__dirname, '..');
 export function runCli(argv, options = {}) {
   const ctx = {
     env: options.env || process.env,
+    cwd: options.cwd || process.cwd(),
     stdout: options.stdout || process.stdout,
     stderr: options.stderr || process.stderr,
   };
@@ -62,6 +64,8 @@ export function runCli(argv, options = {}) {
         return focusCommand(ctx, parsed.opts);
       case 'log':
         return logCommand(ctx, parsed.opts);
+      case 'archive':
+        return archiveCommand(ctx, parsed.opts);
       case 'handoff':
         return handoffCommand(ctx, parsed.opts);
       case 'evaluate':
@@ -143,6 +147,7 @@ Usage:
   awareness check [--home PATH] [--strict]
   awareness focus --task ID --summary TEXT --repo TEXT --branch TEXT --next TEXT [--state STATE] [--home PATH]
   awareness log --task ID --summary TEXT --changes TEXT [--context TEXT] [--state STATE] [--evidence TEXT] [--next TEXT] [--home PATH]
+  awareness archive [--dry-run] [--home PATH]
   awareness handoff [--home PATH]
   awareness evaluate [--home PATH] [--force] [--print]
   awareness memory show [--home PATH]
@@ -261,30 +266,55 @@ function statusCommand(ctx, opts) {
   out(ctx, 'Current Focus');
   out(ctx, focus.trim() || '(empty)');
 
+  const session = detectGitContext(ctx.cwd);
+  if (session.isRepo) {
+    out(ctx, '');
+    out(ctx, 'Session Context');
+    out(ctx, `- Repository: ${session.repo}`);
+    out(ctx, `- Branch: ${session.branch || 'Unspecified'}`);
+    const divergence = focusDivergence(focus, session);
+    if (divergence) out(ctx, `- Note: ${divergence}`);
+  }
+
+  // Divergence is already stated in the Session Context note above; repeating it
+  // under Warnings is the kind of noise that trains operators to skim past them.
   const warnings = collectWarnings(home, todayParts(ctx));
   out(ctx, '');
   out(ctx, warnings.length ? `Warnings: ${warnings.length}` : 'Warnings: none');
   for (const warning of warnings) {
     out(ctx, `- ${warning}`);
   }
+
+  const setup = collectSetupWarnings(home);
+  if (setup.length) {
+    out(ctx, '');
+    out(ctx, 'Setup');
+    for (const item of setup) out(ctx, `- ${item}`);
+  }
   return 0;
 }
 
 function checkCommand(ctx, opts) {
   const home = agentsHome(ctx, opts);
-  const warnings = collectWarnings(home, todayParts(ctx));
+  const warnings = collectWarnings(home, todayParts(ctx), detectGitContext(ctx.cwd));
+  const setup = collectSetupWarnings(home);
 
   if (!warnings.length) {
     out(ctx, `OK: awareness state is maintainable (${home})`);
-    return 0;
+  } else {
+    out(ctx, `Found ${warnings.length} awareness issue(s):`);
+    for (const warning of warnings) {
+      out(ctx, `- ${warning}`);
+    }
   }
 
-  out(ctx, `Found ${warnings.length} awareness issue(s):`);
-  for (const warning of warnings) {
-    out(ctx, `- ${warning}`);
+  if (setup.length) {
+    out(ctx, '');
+    out(ctx, 'Setup:');
+    for (const item of setup) out(ctx, `- ${item}`);
   }
 
-  return opts.strict ? 1 : 0;
+  return opts.strict && warnings.length ? 1 : 0;
 }
 
 function focusCommand(ctx, opts) {
@@ -293,8 +323,9 @@ function focusCommand(ctx, opts) {
   const summary = required(opts, 'summary');
   const next = required(opts, 'next');
   const state = normalizeState(opts.state || DEFAULT_STATE);
-  const repo = opts.repo || 'Unspecified';
-  const branch = opts.branch || 'Unspecified';
+  const session = detectGitContext(ctx.cwd);
+  const repo = opts.repo || session.repo || 'Unspecified';
+  const branch = opts.branch || session.branch || 'Unspecified';
   const timestamp = formatTimestamp(todayParts(ctx));
 
   ensurePrivateState(home, ctx);
@@ -355,7 +386,56 @@ function logCommand(ctx, opts) {
     next: opts.next || '',
   });
 
+  const currentPath = awarenessPath(home);
+  const board = fs.readFileSync(currentPath, 'utf8');
+  const withDone = appendTaskDone(board, task, changes);
+  if (withDone !== board) fs.writeFileSync(currentPath, withDone);
+
   out(ctx, `Worklog entry appended: ${task} - ${summary}`);
+  return 0;
+}
+
+function archiveCommand(ctx, opts) {
+  const home = agentsHome(ctx, opts);
+  const currentPath = awarenessPath(home);
+  if (!fs.existsSync(currentPath)) {
+    err(ctx, `Missing awareness board: ${currentPath}`);
+    return 1;
+  }
+
+  const content = fs.readFileSync(currentPath, 'utf8');
+  const focusTask = metadataValue(extractSection(content, 'Current Focus'), 'Task');
+  const active = extractSection(content, 'Active Tasks');
+  const blocks = splitTaskBlocks(active);
+  // Keep the focused task even when done: retiring it would leave Current Focus
+  // pointing at a task with no detail anywhere on the board.
+  const retired = blocks.filter((block) => /- State:\s*done\b/.test(block) && taskIdOfBlock(block) !== focusTask);
+
+  if (!retired.length) {
+    out(ctx, 'Board is current: no tasks to archive.');
+    return 0;
+  }
+
+  if (opts.dryRun) {
+    out(ctx, `Would archive ${retired.length} done task(s):`);
+    for (const block of retired) out(ctx, `- ${taskIdOfBlock(block)}`);
+    return 0;
+  }
+
+  const today = todayParts(ctx);
+  const month = today.date.slice(0, 7);
+  const archiveDir = path.join(home, 'awareness', 'archive');
+  ensureDir(archiveDir);
+  const archiveFile = path.join(archiveDir, `${month}.md`);
+  const header = `# Archived Tasks - ${month}\n`;
+  const existing = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, 'utf8') : header;
+  fs.writeFileSync(archiveFile, `${existing.trimEnd()}\n\n${retired.join('\n\n')}\n`);
+
+  const kept = blocks.filter((block) => !retired.includes(block));
+  const newActive = kept.length ? `${kept.join('\n\n')}\n` : '- None.\n';
+  fs.writeFileSync(currentPath, replaceSection(content, 'Active Tasks', newActive));
+
+  out(ctx, `Archived ${retired.length} done task(s) to ${archiveFile}`);
   return 0;
 }
 
@@ -368,10 +448,18 @@ function handoffCommand(ctx, opts) {
   }
 
   const content = fs.readFileSync(currentPath, 'utf8');
+  const focus = extractSection(content, 'Current Focus');
   out(ctx, 'Handoff Snapshot');
   out(ctx, '');
   out(ctx, 'Current Focus');
-  out(ctx, extractSection(content, 'Current Focus').trim() || '(empty)');
+  out(ctx, focus.trim() || '(empty)');
+  // A handoff is where control is yielded, so replaying a focus that belongs to
+  // another repo is the most costly place to assert it without qualification.
+  const divergence = focusDivergence(focus, detectGitContext(ctx.cwd));
+  if (divergence) {
+    out(ctx, '');
+    out(ctx, `- Note: ${divergence} This snapshot replays stored state, not this session's work.`);
+  }
   out(ctx, '');
   out(ctx, 'Blocked Tasks');
   out(ctx, extractSection(content, 'Blocked Tasks').trim() || '- None.');
@@ -648,14 +736,16 @@ function memorySetupCommand(ctx, home, opts) {
   const providers = provider === 'auto' ? ['claude', 'codex', 'opencode'] : [provider];
   fs.writeFileSync(scriptPath, generateTriggerScript(providers), { mode: 0o755 });
 
+  // Persist the wiring. Printing an `export` line left the trigger silently
+  // disabled for anyone who did not edit their shell profile.
+  writeConfig(home, { memoryTriggerCommand: scriptPath });
+
   out(ctx, `Installed: ${scriptPath}`);
   out(ctx, `Providers: ${providers.join(' → ')}`);
+  out(ctx, `Recorded in: ${configPath(home)}`);
   out(ctx, '');
-  out(ctx, 'Add to your shell profile (.zshrc / .bashrc / .profile):');
-  out(ctx, `  export AWARENESS_MEMORY_TRIGGER_COMMAND="${scriptPath}"`);
-  out(ctx, '  export AWARENESS_MEMORY_TRIGGER_TIMEOUT_MS=30000');
-  out(ctx, '');
-  out(ctx, 'Then reload: source ~/.zshrc');
+  out(ctx, 'Active now — no shell profile change required.');
+  out(ctx, 'To override per shell, export AWARENESS_MEMORY_TRIGGER_COMMAND.');
   out(ctx, '');
   out(ctx, 'Guard against recursion is built in — safe to use with claude/codex/opencode hooks.');
   return 0;
@@ -1181,6 +1271,7 @@ function runAndRecordMemoryTrigger(ctx, home, { phase, text = '', action = '' })
   appendRuntimeEvent(home, todayParts(ctx), 'memory-trigger', {
     source: 'memory.trigger',
     phase: trigger.phase,
+    configured: trigger.configured,
     provider: trigger.provider,
     model: trigger.model,
     shouldRecall: trigger.shouldRecall,
@@ -1283,6 +1374,11 @@ function emitFocusContext(ctx, home) {
   out(ctx, '');
   out(ctx, focus);
   out(ctx, '');
+  const divergence = focusDivergence(focus, detectGitContext(ctx.cwd));
+  if (divergence) {
+    out(ctx, `WARNING: ${divergence} This focus may not apply to the current session — confirm before acting on it, and realign with \`awareness focus\` if you are starting different work.`);
+    out(ctx, '');
+  }
   out(ctx, 'Follow the awareness protocol; run `awareness handoff` before yielding control.');
 }
 
@@ -1296,7 +1392,11 @@ function emitFocusContextAsAdditionalContext(ctx, home) {
     const logPart = task
       ? `usa 'awareness log --task ${task} --summary TEXT --changes TEXT' para registrar trabajo, y 'awareness handoff' antes de responder.`
       : "usa 'awareness log' y 'awareness handoff' antes de responder.";
-    msg = `[awareness] Focus: ${taskPart}. OBLIGATORIO: ${logPart}`;
+    const divergence = focusDivergence(focusText, detectGitContext(ctx.cwd));
+    const divergencePart = divergence
+      ? ` AVISO: ${divergence} Puede no aplicar a esta sesión — confirmá antes de actuar.`
+      : '';
+    msg = `[awareness] Focus: ${taskPart}. OBLIGATORIO: ${logPart}${divergencePart}`;
   } else {
     msg = "[awareness] Sin foco activo. Usá 'awareness focus', 'awareness log' y 'awareness handoff' antes de responder.";
   }
@@ -1645,7 +1745,18 @@ function personalityAppend(ctx, file, opts, kind) {
   return 0;
 }
 
-function collectWarnings(home, today) {
+// Environment/config gaps, kept separate from board-state warnings: these are
+// operator setup steps, not awareness-quality signals, so they must not feed
+// the evaluation diagnostics that generate memory promotion candidates.
+function collectSetupWarnings(home) {
+  const warnings = [];
+  if (!resolveTriggerCommand({}, home)) {
+    warnings.push('Memory trigger has no AI provider; recall never runs. Configure it with: awareness memory setup');
+  }
+  return warnings;
+}
+
+function collectWarnings(home, today, sessionContext = null) {
   const warnings = [];
   const currentPath = awarenessPath(home);
   const worklogPath = path.join(home, 'worklog', `${today.date}.md`);
@@ -1661,6 +1772,11 @@ function collectWarnings(home, today) {
     if (!/- Task:\s+\S+/.test(focus)) warnings.push('Current Focus is missing Task.');
     if (!/- Next:\s+(?!The next concrete action)\S+/.test(focus)) warnings.push('Current Focus is missing a concrete Next action.');
     if (/YYYY-MM-DD|branch-name/.test(current)) warnings.push('Awareness board still contains template placeholders.');
+
+    const divergence = focusDivergence(focus, sessionContext);
+    if (divergence) {
+      warnings.push(`${divergence} Realign with: awareness focus --task ID --summary TEXT --next TEXT`);
+    }
 
     const active = extractSection(current, 'Active Tasks');
     const taskBlocks = active
@@ -1848,17 +1964,32 @@ function isTaskId(value) {
 
 function upsertActiveTask(content, task, home) {
   const active = extractSection(content, 'Active Tasks');
-  const heading = `${task.task} - ${task.summary}`;
-  const taskPattern = new RegExp(`### ${escapeRegExp(task.task)}(?: - .*?)?\\n[\\s\\S]*?(?=\\n### |\\n## |$)`);
-  const block = [
-    `### ${heading}`,
+  const taskPattern = taskBlockPattern(task.task);
+  const existing = taskPattern.exec(active)?.[0] || '';
+  const block = renderTaskBlock({ ...task, done: extractBlockList(existing, 'Done') }, home);
+
+  const newActive = taskPattern.test(active)
+    ? active.replace(taskPattern, () => block.trimEnd())
+    : `${active.replace(/^- None\.\s*/m, '').trimEnd()}\n\n${block}`.trimStart();
+
+  return replaceSection(content, 'Active Tasks', `${newActive.trimEnd()}\n`);
+}
+
+function renderTaskBlock(task, home) {
+  const lines = [
+    `### ${task.task} - ${task.summary}`,
     '',
     `- State: ${task.state}`,
     `- Last update: ${task.timestamp}`,
     `- Repository: ${task.repo}`,
     `- Branch: ${task.branch}`,
-    '- Done:',
-    '  - Focus updated.',
+  ];
+  // Only emit Done when there is real recorded work. A fabricated entry makes
+  // the board look populated while carrying no information.
+  if (task.done?.length) {
+    lines.push('- Done:', ...task.done.map((item) => `  - ${item}`));
+  }
+  lines.push(
     '- Next:',
     `  - ${task.next}`,
     '- Blockers:',
@@ -1866,13 +1997,54 @@ function upsertActiveTask(content, task, home) {
     '- Evidence:',
     `  - ${awarenessPath(home)}`,
     '',
-  ].join('\n');
+  );
+  return lines.join('\n');
+}
 
-  const newActive = taskPattern.test(active)
-    ? active.replace(taskPattern, block.trimEnd())
-    : `${active.replace(/^- None\.\s*/m, '').trimEnd()}\n\n${block}`.trimStart();
+function taskBlockPattern(taskId) {
+  return new RegExp(`### ${escapeRegExp(taskId)}(?: - .*?)?\\n[\\s\\S]*?(?=\\n### |\\n## |$)`);
+}
 
+function extractBlockList(block, key) {
+  const match = new RegExp(`- ${key}:[^\\S\\n]*\\n((?:[^\\S\\n]+-[^\\S\\n]+.*\\n?)*)`).exec(block);
+  if (!match) return [];
+  return match[1]
+    .split('\n')
+    .map((line) => line.replace(/^\s*-\s+/, '').trim())
+    .filter(Boolean)
+    // Legacy boards recorded this placeholder on every focus switch; drop it so
+    // rewritten blocks carry only real work.
+    .filter((item) => item !== 'Focus updated.');
+}
+
+function appendTaskDone(content, taskId, entry) {
+  const active = extractSection(content, 'Active Tasks');
+  const taskPattern = taskBlockPattern(taskId);
+  const match = taskPattern.exec(active);
+  if (!match) return content;
+
+  const block = match[0];
+  const item = `  - ${entry}`;
+  const updated = /- Done:/.test(block)
+    ? block.replace(
+      /- Done:[^\S\n]*\n(?:[^\S\n]+-[^\S\n]+.*\n?)*/,
+      (section) => `${section.replace(/\n?$/, '\n')}${item}\n`,
+    )
+    : block.replace(/- Next:/, () => `- Done:\n${item}\n- Next:`);
+
+  const newActive = active.replace(taskPattern, () => updated.trimEnd());
   return replaceSection(content, 'Active Tasks', `${newActive.trimEnd()}\n`);
+}
+
+function splitTaskBlocks(active) {
+  return active
+    .split(/\n(?=### )/)
+    .filter((block) => block.trim().startsWith('### '))
+    .map((block) => block.trimEnd());
+}
+
+function taskIdOfBlock(block) {
+  return block.split('\n')[0].replace(/^### /, '').split(' - ')[0].trim();
 }
 
 function ensurePrivateState(home, ctx) {
@@ -2013,6 +2185,48 @@ function replaceMetadata(content, key, value) {
     return content.replace(pattern, `- ${key}: ${value}`);
   }
   return content.replace(/^# .+$/m, (heading) => `${heading}\n\n- ${key}: ${value}`);
+}
+
+function configPath(home) {
+  return path.join(home, 'config.json');
+}
+
+function readConfig(home) {
+  try {
+    return JSON.parse(fs.readFileSync(configPath(home), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeConfig(home, patch) {
+  const config = { ...readConfig(home), ...patch };
+  ensureDir(home);
+  fs.writeFileSync(configPath(home), `${JSON.stringify(config, null, 2)}\n`);
+  return config;
+}
+
+function focusDivergence(focus, session) {
+  if (!session?.isRepo) return null;
+  const focusRepo = metadataValue(focus, 'Repository');
+  const focusBranch = metadataValue(focus, 'Branch');
+  if (!focusRepo || focusRepo === 'Unspecified') return null;
+
+  // Compare the trailing segment so `fyso/ingest` and `fyso-dev/ingest` are the
+  // same repo: owner spelling varies between remotes and hand-typed focus.
+  const repoDiverges = repoLeaf(focusRepo) !== repoLeaf(session.repo);
+  const branchDiverges = Boolean(
+    session.branch && focusBranch && focusBranch !== 'Unspecified' && focusBranch !== session.branch,
+  );
+  if (!repoDiverges && !branchDiverges) return null;
+
+  const focusLabel = `${focusRepo} / ${focusBranch || 'Unspecified'}`;
+  const sessionLabel = `${session.repo} / ${session.branch || 'Unspecified'}`;
+  return `Current Focus (${focusLabel}) diverges from session context (${sessionLabel}).`;
+}
+
+function repoLeaf(value) {
+  return String(value || '').trim().replace(/\.git$/, '').split('/').pop().toLowerCase();
 }
 
 function metadataValue(content, key) {

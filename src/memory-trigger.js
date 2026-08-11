@@ -24,10 +24,22 @@ export function buildMemoryTriggerContext({ home, phase, text = '', action = '',
   };
 }
 
+export function resolveTriggerCommand(env, home) {
+  const fromEnv = env.AWARENESS_MEMORY_TRIGGER_COMMAND;
+  if (fromEnv) return fromEnv;
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8'));
+    return config.memoryTriggerCommand || '';
+  } catch {
+    return '';
+  }
+}
+
 export function runMemoryTrigger({ home, ctx, phase, text = '', action = '', focus = '', currentContext = '' }) {
   const context = buildMemoryTriggerContext({ home, phase, text, action, focus, currentContext });
   const startedAt = Date.now();
-  const decision = decideMemoryTrigger(ctx.env, context);
+  const command = resolveTriggerCommand(ctx.env, home);
+  const decision = decideMemoryTrigger(ctx.env, context, command);
   const providerRan = decision.provider !== 'none';
   const decisionTokensIn = providerRan ? estimateTokens(JSON.stringify(context)) : 0;
   const decisionTokensOut = providerRan ? estimateTokens(JSON.stringify(decision.raw || decision)) : 0;
@@ -43,6 +55,7 @@ export function runMemoryTrigger({ home, ctx, phase, text = '', action = '', foc
 
   return {
     phase,
+    configured: Boolean(command) || decision.provider === 'fixture',
     provider: decision.provider,
     model: decision.model || null,
     shouldRecall: Boolean(decision.shouldRecall),
@@ -89,7 +102,7 @@ export function estimateTokens(text) {
   return Math.ceil(value.length / 4);
 }
 
-function decideMemoryTrigger(env, context) {
+function decideMemoryTrigger(env, context, resolvedCommand = '') {
   const fixture = env.AWARENESS_MEMORY_TRIGGER_DECISION_JSON;
   if (fixture) return normalizeDecision(parseJson(fixture, 'AWARENESS_MEMORY_TRIGGER_DECISION_JSON'), 'fixture');
 
@@ -103,12 +116,12 @@ function decideMemoryTrigger(env, context) {
     }, 'none');
   }
 
-  const command = env.AWARENESS_MEMORY_TRIGGER_COMMAND;
+  const command = resolvedCommand;
   if (!command) {
     return normalizeDecision({
       shouldRecall: false,
       confidence: 0,
-      reason: 'AI trigger provider not configured',
+      reason: 'AI trigger provider not configured (run: awareness memory setup)',
       intent: '',
       risk: 'unknown',
     }, 'none');
